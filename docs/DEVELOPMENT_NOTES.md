@@ -104,9 +104,17 @@
 仍写绝对路径。这样整个平台目录搬到别的盘或改名，工具探测不会连带失效。
 
 约定：
+- **版本管理改用 git（2026-09-09 起）**：本仓库已 `git init` 并推送
+  GitHub（`zhangwenda0518/plant-virus-analysis-platform`）。
+  改代码前不要复制 `*.bak_<改动名>_<日期>`——历史用
+  `git log -p -- <path>` 看演进、`git show <sha>:<path>` 取回旧版；
+  `.gitignore` 已禁止提交 `*.bak_*` / `*.bak` / `*.orig`。
+  2026-09-09 一次性清理了 74 个历史手工备份（含 `tools.html` 的 8 个版本），
+  内容全部在 git 历史里（如 `git show 38243d2:webapp/templates/tools.html.bak_nodeid_20260909`）。
+  回退：`git revert <sha>` / `git checkout <sha> -- <path>`。
 - 临时/中间文件一律写进对应任务目录（results/<样品>/… 或 tool_runs/<run>/），
   禁止落在平台根目录（历史上曾出现 `C:` 空目录、`orfipy_*_out` 等遗留物）。
-- `*.orig.exe` 等备份文件保留在原处需注明用途，长期不用应移入 docs/ 归档说明。
+- `*.orig.exe` 等二进制备份保留在原处需注明用途，长期不用应移入 docs/ 归档说明。
   **当前唯一备份**：`bin/kun_peng-*.orig.exe` 是 kunpeng 打补丁前的原版
   （MD5 与在用 exe 不同，勿当重复文件删）。
   `bin/sracha.exe` 与 `bin/sracha-0.6.0-local-patch.exe` 也不是同一文件，

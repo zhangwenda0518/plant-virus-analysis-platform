@@ -60,3 +60,11 @@ dist/
 build/
 *.log
 *.tmp
+
+# ---------- 8. 禁止再提交手工备份 ----------
+# 本平台已启用 git（2026-09-09 起）：历史版本用 `git show <sha>:<path>` 取回，
+# 或用 `git log -p -- <path>` 看演进，不要再复制 *.bak_* / *.bak / *.orig。
+# 例：git show 38243d2:webapp/templates/tools.html.bak_nodeid_20260909
+*.bak_*
+*.bak
+*.orig
