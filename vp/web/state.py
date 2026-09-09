@@ -49,3 +49,21 @@ cfg = get_config()
 def tool_runs_root():
     """tool_runs 根目录（设置自定义输出根后由 DIRS 决定）。"""
     return DIRS.get('tool_runs') or os.path.join(PLATFORM_ROOT, 'tool_runs')
+
+
+# ------------------------------------------------------------------
+# 批处理队列单例（SampleQueue 在 app.py 中实例化，2D 批次迁出）
+# 用「注册 / 取用」而非 `import app`，避免 blueprint ↔ app 循环导入。
+# ------------------------------------------------------------------
+_sample_queue = None
+
+
+def set_sample_queue(queue):
+    """由 app.py 在创建 sample_queue 后调用。"""
+    global _sample_queue
+    _sample_queue = queue
+
+
+def get_sample_queue():
+    """供 blueprint 取用（download 的「转入分析流程」用）。"""
+    return _sample_queue
