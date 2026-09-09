@@ -179,6 +179,43 @@ def main():
     r = c.post('/api/tool/runs/no_such_run/delete')
     check(r.status_code == 400, '删除不存在运行 400')
 
+    # ---------- 3c. 导航项 ↔ 卡片一一对应 ----------
+    # showModule() 只切换 <main> 的直接子元素（:scope > *）。若某个导航项
+    # 对应的 id 不是 main 的直接子元素（例如被嵌在别的卡片里），点它就是
+    # 空白页——2026-09-09 的 t-kvchain 正是如此（曾是 t-kvsuite 内的 div）。
+    from html.parser import HTMLParser as _HP
+    from vp.web.pages import NAV_GROUPS as _NAV
+
+    class _MainKids(_HP):
+        def __init__(self):
+            super().__init__()
+            self.depth = 0
+            self.main_depth = None
+            self.ids = set()
+
+        def handle_starttag(self, tag, attrs):
+            d = dict(attrs)
+            if tag == 'main':
+                self.main_depth = self.depth
+            if (self.main_depth is not None
+                    and self.depth == self.main_depth + 1 and d.get('id')):
+                self.ids.add(d['id'])
+            if tag not in ('br', 'img', 'input', 'meta', 'link', 'hr'):
+                self.depth += 1
+
+        def handle_endtag(self, tag):
+            if tag not in ('br', 'img', 'input', 'meta', 'link', 'hr'):
+                self.depth -= 1
+            if tag == 'main':
+                self.main_depth = None
+
+    _mk = _MainKids()
+    _mk.feed(hv)
+    _want = {it['id'] for g in _NAV for it in g['items'] if it.get('id')}
+    _missing = sorted(_want - _mk.ids)
+    check(not _missing,
+          f'导航项均有 <main> 直接子卡片（缺失: {_missing or "无"}）')
+
     # ---------- 4. 静态资源 ----------
     r = c.get('/static/app.js')
     check(r.status_code == 200, 'app.js 静态资源 200')

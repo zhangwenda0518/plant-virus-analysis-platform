@@ -541,25 +541,38 @@
        完全照搬 D:\桌面\延伸基因组\MMPV-RNA\virome_analysis_pipeline：
        鉴定 → 过滤 → 共识 → 深度绘图 → 变异注释。
        minibwa 替代 bowtie2，caller 用 bcftools mpileup+call。 -->
+  <!-- 一键分析（全流程）：本组五段一次跑完，产物收拢到汇总目录。
+       必须独立成卡（id=t-kvchain）：showModule() 只切换 <main> 的直接子元素，
+       此前它是 t-kvsuite 卡内的 <div>，点导航栏「一键分析（全流程）」会得到空白页。 -->
+  <section class="card" id="t-kvchain">
+    <h2 data-i18n="tk.kvChainTitle">⚡ 一键分析（全流程）</h2>
+    <p class="hint" data-i18n="tk.kvChainHint">
+      鉴定 → 过滤 → 共识 → 深度绘图 → 变异注释，一次跑完；
+      参数沿用「已知病毒识别与定量」卡的表单，结果收拢到汇总目录（符号链接 + _chain.json）。
+    </p>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
+      <button class="btn primary" onclick="runKvchain(this)" data-i18n="tk.runKvchain">⚡ 一键运行（全流程）</button>
+      <button class="btn small" onclick="loadChainResult('kvchain')" title="读取最近一次一键运行的汇总" data-i18n="c.latestChain" data-i18n-title="c.latestChainTitle">📂 最近汇总</button>
+    </div>
+
+    <div id="kvChainResult" class="card" style="margin-top:12px;display:none">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <b id="kvcTitle" data-i18n="tk.kvcTitle">一键全流程汇总</b>
+        <button class="btn small" onclick="$('kvChainResult').style.display='none'">✕</button>
+      </div>
+      <div id="kvcSteps" style="margin-top:8px"></div>
+      <details class="rpt-sec" open style="margin-top:10px">
+        <summary data-i18n="tk.b.summaryDir">汇总目录（符号链接）</summary>
+        <div class="rpt-sec-body">
+          <div id="kvcEntries"></div>
+        </div>
+      </details>
+    </div>
+  </section>
+
+
   <section class="card" id="t-kvsuite">
     <h2 data-i18n="tk.kvH2">🦠 已知病毒识别与定量</h2>
-
-    <!-- 一键入口：本组五段全流程跑完并把产物收拢到汇总目录 -->
-    <div id="t-kvchain" style="border:1px solid var(--line-200,#e3e3e3);border-radius:8px;padding:12px 14px;margin:10px 0;background:var(--bg-soft,#fafafa)">
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-        <div>
-          <b data-i18n="tk.kvChainTitle">⚡ 一键分析（全流程）</b>
-          <div class="hint" style="margin:4px 0 0" data-i18n="tk.kvChainHint">
-            鉴定 → 过滤 → 共识 → 深度绘图 → 变异注释，一次跑完；
-            参数沿用下方表单，结果收拢到汇总目录（符号链接 + _chain.json）。
-          </div>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center">
-          <button class="btn primary" onclick="runKvchain(this)" data-i18n="tk.runKvchain">⚡ 一键运行（全流程）</button>
-          <button class="btn small" onclick="loadChainResult('kvchain')" title="读取最近一次一键运行的汇总" data-i18n="c.latestChain" data-i18n-title="c.latestChainTitle">📂 最近汇总</button>
-        </div>
-      </div>
-    </div>
 
     <p class="hint" data-i18n="tk.kvHint">把样品 reads <b>直接比对到已知病毒参考库</b>，一步跑完五段：
        <b>鉴定</b>（比对 + 覆盖度 + 泊松打假）→ <b>过滤</b>（双轨阈值）→
@@ -737,20 +750,6 @@
         </div>
       </details>
       <div class="rh" id="rh-kvsuite"></div>
-    </div>
-
-    <div id="kvChainResult" class="card" style="margin-top:12px;display:none">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <b id="kvcTitle" data-i18n="tk.kvcTitle">一键全流程汇总</b>
-        <button class="btn small" onclick="$('kvChainResult').style.display='none'">✕</button>
-      </div>
-      <div id="kvcSteps" style="margin-top:8px"></div>
-      <details class="rpt-sec" open style="margin-top:10px">
-        <summary data-i18n="tk.b.summaryDir">汇总目录（符号链接）</summary>
-        <div class="rpt-sec-body">
-          <div id="kvcEntries"></div>
-        </div>
-      </details>
     </div>
   </section>
 
