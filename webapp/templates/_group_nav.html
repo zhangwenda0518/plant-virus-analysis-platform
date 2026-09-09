@@ -1,0 +1,17 @@
+{# 组导航：顶部横向切换条（替代原左侧栏，省空间）。
+   数据源 = app.py NAV_GROUPS（context processor 注入 current_group）。
+   当前页按 request.path 与 item.href 精确匹配高亮；
+   工具台条目（无 href）跳 /tools?g=<组>#<id>。 #}
+{% if current_group %}
+<nav class="group-topbar">
+  <a class="gt-home" href="/tools?g={{ current_group.id }}"
+     title="返回 {{ current_group.label }} 组概览">🏠 {{ current_group.label }}</a>
+  <div class="gt-items">
+    {%- for it in current_group['items'] %}
+    {% set href = it.href or ('/tools?g=' ~ current_group.id ~ '#' ~ it.id) %}
+    <a class="gt-item{{ ' on' if request.path == it.href }}" href="{{ href }}"
+       title="{{ it.desc or '' }}">{{ it.title }}</a>
+    {%- endfor %}
+  </div>
+</nav>
+{% endif %}

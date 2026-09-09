@@ -1,0 +1,609 @@
+# -*- coding: utf-8 -*-
+"""
+平台配置：工具路径自动探测 / 手动覆盖、目录布局、线程数。
+配置持久化到 <平台根>/platform.json，GUI 修改后立即生效。
+"""
+import os
+import sys
+import json
+import glob
+import shutil
+
+if sys.platform == 'win32':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
+
+def _detect_platform_root():
+    """平台根目录：PyInstaller 打包后 = exe 所在目录；源码运行 = vp/ 上级目录。"""
+    if getattr(sys, 'frozen', False):          # PyInstaller 环境
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+PLATFORM_ROOT = _detect_platform_root()
+
+
+def engine_cmd(script_abspath, *args):
+    """构造「以子进程运行内部引擎脚本」的命令行。
+
+    源码运行: [python, script.py, args...]
+    冻结分发: [VirusPlatform.exe, --run-engine, script.py, args...]
+    （打包环境无独立 python、无源码脚本路径；app.py 入口识别 --run-engine
+    后经 vp/engine_entry.py 进程内执行对应引擎。）
+    """
+    if getattr(sys, 'frozen', False):
+        return [sys.executable, '--run-engine',
+                os.path.basename(script_abspath)] + list(args)
+    # -u：子进程 stdout 无缓冲（管道默认块缓冲会让任务日志长时间空白）
+    return [sys.executable, '-u', script_abspath] + list(args)
+
+# ------------------------------------------------------------------
+# 目录布局（全部限定在平台根目录内）
+# ------------------------------------------------------------------
+DIRS = {
+    'databases': os.path.join(PLATFORM_ROOT, 'databases'),   # kunpeng 库根目录
+    'taxonomy':  os.path.join(PLATFORM_ROOT, 'databases', 'taxonomy'),
+    'host_src':  os.path.join(PLATFORM_ROOT, 'host-db'),     # 宿主源基因组
+    'virus_src': os.path.join(PLATFORM_ROOT, 'virus-db'),    # 病毒源参考
+    'results':   os.path.join(PLATFORM_ROOT, 'results'),     # 样品结果
+    'tool_runs': os.path.join(PLATFORM_ROOT, 'tool_runs'),   # 工具运行目录
+    'downloads': os.path.join(PLATFORM_ROOT, 'downloads'),   # 公共数据下载
+    'logan':     os.path.join(PLATFORM_ROOT, 'logan'),       # LOGAN 溯源任务
+    'submissions': os.path.join(PLATFORM_ROOT, 'submissions'),  # NCBI 提交准备
+    'meta_search': os.path.join(PLATFORM_ROOT, 'meta_search'),  # 公共数据检索
+    'tasks':     os.path.join(PLATFORM_ROOT, 'tasks'),       # GUI 任务状态
+    'logs':      os.path.join(PLATFORM_ROOT, 'logs'),        # 全局日志
+    'webapp_static': os.path.join(PLATFORM_ROOT, 'webapp', 'static'),
+}
+
+# ------------------------------------------------------------------
+# 数据库分类路径注册表
+# ------------------------------------------------------------------
+DB_LAYOUT = {
+    'virus': {
+        'plant': ('virus/plant', 'virus_db'),
+        'ref':   ('virus/ref',   'refvirus_db'),
+        'rvdb':  ('virus/rvdb',  'rvdb_db'),
+    },
+    'host': {
+        'classify': ('host/classify', 'host_db'),
+    },
+    'annot': {
+        'cdd':  ('annot/cdd',  'cdd'),
+        'hmm':  ('annot/hmm',  'hmm'),
+        'prot': ('annot/prot', 'viral_prot'),
+    },
+    'tax': {
+        'core': ('tax/core', 'taxonomy'),
+        'ictv': ('tax/ictv', 'ictv_db'),
+    },
+    'misc': {
+        'viroids': ('misc/viroids', 'viroids-db'),
+        'suvtk':   ('misc/suvtk',   'suvtk_db'),
+        'gb':      ('misc/gb',      'gb_collections'),
+        'prob':    ('misc/prob',    'host_prob'),
+    },
+}
+
+
+def _db_path(new_sub, old_name):
+    """数据库路径：新分类路径优先，未迁移时回退旧目录。
+
+    返回新路径；若新路径尚不存在且旧目录存在，则返回旧目录（迁移期间
+    兼容）。目录落盘（建库）始终走新结构。
+    """
+    base = DIRS['databases']
+    new = os.path.join(base, new_sub)
+    if os.path.isdir(new):
+        return new
+    old = os.path.join(base, old_name)
+    if os.path.isdir(old):
+        return old
+    return new
+
+
+def db_path(category, name):
+    """按分类取数据库路径（virus/plant、host/classify、annot/cdd 等）。"""
+    sub, old = DB_LAYOUT[category][name]
+    return _db_path(sub, old)
+
+
+# taxonomy 目录也走注册表（新 tax/core 优先，旧 databases/tax/core 兜底），
+# 迁移前后 DIRS['taxonomy'] 都能解析到有效路径。
+DIRS['taxonomy'] = db_path('tax', 'core')
+
+
+def host_source_dirs():
+    """host-db 下所有宿主源目录（<taxid>_<slug>/ 且含 genome.fa）。"""
+    base = DIRS['host_src']
+    if not os.path.isdir(base):
+        return []
+    out = []
+    for n in sorted(os.listdir(base)):
+        p = os.path.join(base, n)
+        if os.path.isdir(p) and os.path.isfile(os.path.join(p, 'genome.fa')):
+            out.append(n)
+    return out
+
+
+def current_host_genome():
+    """当前宿主源基因组：host-db 下第一个含 genome.fa 的宿主目录。
+    兼容旧默认（host-db/genome.fa）。"""
+    dirs = host_source_dirs()
+    if dirs:
+        return os.path.join(DIRS['host_src'], dirs[0], 'genome.fa')
+    old = os.path.join(DIRS['host_src'], 'genome.fa')
+    return old if os.path.isfile(old) else None
+
+
+CONFIG_FILE = os.path.join(PLATFORM_ROOT, 'platform.json')
+
+
+# ------------------------------------------------------------------
+# 自定义输出根目录：设置后所有产物（样品结果 / 工具运行 / 数据下载 /
+# 公共数据检索 / LOGAN / 提交准备 / 日志）按推荐结构写入该目录下的
+# 同名子目录（自动创建）；留空 = 平台目录内。
+# ------------------------------------------------------------------
+OUTPUT_SUBDIRS = ('results', 'tool_runs', 'downloads', 'meta_search',
+                  'logan', 'submissions', 'logs')
+
+_OUTPUT_ROOT = ''          # 模块级当前自定义输出根（'' = 默认平台目录）
+
+
+def apply_output_root(root):
+    """设置/切换输出根：原地重写 DIRS 输出类条目并自动创建推荐子目录。
+
+    所有功能在运行时读取 DIRS，因此切换立即对全部模块生效，无需重启。
+    """
+    global _OUTPUT_ROOT
+    root = (root or '').strip()
+    if root:
+        if not os.path.isabs(root):
+            raise ValueError('输出目录需为绝对路径')
+        root = os.path.normpath(os.path.abspath(root))
+        os.makedirs(root, exist_ok=True)
+    _OUTPUT_ROOT = root
+    for name in OUTPUT_SUBDIRS:
+        target = os.path.join(root, name) if root \
+            else os.path.join(PLATFORM_ROOT, name)
+        DIRS[name] = target
+        os.makedirs(target, exist_ok=True)
+    # 同步预建 tool_runs 固定子目录（_archive/_tmp/_scripts/_reports）；
+    # 懒导入避免与 tool_runs_admin 循环依赖
+    try:
+        from .tool_runs_admin import ensure_fixed_dirs
+        ensure_fixed_dirs(DIRS['tool_runs'])
+    except Exception:
+        pass
+    return _OUTPUT_ROOT
+
+
+def get_output_root():
+    return _OUTPUT_ROOT
+
+
+def write_roots():
+    """允许写入的根目录集合：平台根 + 自定义输出/输入/数据库根（若有）。
+    check_path(in_platform=True) 据此放行写入类路径。"""
+    roots = [PLATFORM_ROOT]
+    for r in (_OUTPUT_ROOT, _INPUT_ROOT, _DATABASE_ROOT):
+        if r:
+            roots.append(r)
+    return roots
+
+
+# 输入根：测序数据 fastq/ 与拖拽上传 uploads/ 的存放位置
+INPUT_SUBDIRS = ('fastq', 'uploads')
+
+# 数据库根：kunpeng 库/taxonomy/palmdb 等大数据目录 + 建库源数据
+_DATABASE_KEYS = {                       # DIRS 键 → 数据库根下的子路径
+    'databases': 'databases',
+    'taxonomy':  os.path.join('databases', 'taxonomy'),
+    'host_src':  'host-db',
+    'virus_src': 'virus-db',
+}
+
+_INPUT_ROOT = ''           # 模块级当前自定义输入根（'' = 默认平台目录）
+_DATABASE_ROOT = ''        # 模块级当前自定义数据库根（'' = 默认平台目录）
+
+
+def apply_input_root(root):
+    """设置/切换输入根：重写 DIRS['fastq'/'uploads'] 并自动创建。"""
+    global _INPUT_ROOT
+    root = (root or '').strip()
+    if root:
+        if not os.path.isabs(root):
+            raise ValueError('输入目录需为绝对路径')
+        root = os.path.normpath(os.path.abspath(root))
+        os.makedirs(root, exist_ok=True)
+    _INPUT_ROOT = root
+    for name in INPUT_SUBDIRS:
+        DIRS[name] = os.path.join(root, name) if root \
+            else os.path.join(PLATFORM_ROOT, name)
+        os.makedirs(DIRS[name], exist_ok=True)
+    return _INPUT_ROOT
+
+
+def apply_database_root(root):
+    """设置/切换数据库根：重写 DIRS 数据库类条目并自动创建。"""
+    global _DATABASE_ROOT
+    root = (root or '').strip()
+    if root:
+        if not os.path.isabs(root):
+            raise ValueError('数据库目录需为绝对路径')
+        root = os.path.normpath(os.path.abspath(root))
+        os.makedirs(root, exist_ok=True)
+    _DATABASE_ROOT = root
+    for key, sub in _DATABASE_KEYS.items():
+        DIRS[key] = os.path.join(root, sub) if root \
+            else os.path.join(PLATFORM_ROOT, sub)
+        os.makedirs(DIRS[key], exist_ok=True)
+    return _DATABASE_ROOT
+
+
+def get_input_root():
+    return _INPUT_ROOT
+
+
+def get_database_root():
+    return _DATABASE_ROOT
+
+
+def _safe_child(path, parent=PLATFORM_ROOT):
+    """规范化路径并校验必须位于 parent 目录内，禁止 ../ 逃逸。"""
+    norm = os.path.normpath(os.path.abspath(path))
+    parent = os.path.normpath(os.path.abspath(parent))
+    if norm == parent or norm.startswith(parent + os.sep):
+        return norm
+    raise ValueError(f"路径越界（仅允许平台目录内）: {path}")
+
+
+def _first_exist(paths):
+    for p in paths:
+        if p and os.path.isfile(p):
+            return os.path.abspath(p)
+    return None
+
+
+def _glob_first(pattern):
+    hits = sorted(glob.glob(pattern))
+    return os.path.abspath(hits[0]) if hits else None
+
+
+def detect_tools():
+    """自动探测外部工具路径（仅 PATH 与 bin/、tools/ 目录，不访问其他用户目录）。
+    bin/   = 单文件可执行（kunpeng、seqkit、crabz 等）
+    tools/ = 带目录结构的工具套件（Blast、mafft-win、iQtree 等）
+    旧版根目录布局保留为回退候选，兼容已分发的 exe 平台。"""
+    R = PLATFORM_ROOT
+    BIN = os.path.join(R, 'bin')
+    T = os.path.join(R, 'tools')
+    which = shutil.which
+    cands = {
+        'kunpeng': [
+            _glob_first(os.path.join(BIN, 'kun_peng-v*-x86_64-pc-windows-msvc.exe')),
+            _glob_first(os.path.join(BIN, 'kun_peng*.exe')),
+            _glob_first(os.path.join(R, 'kun_peng-v*-x86_64-pc-windows-msvc.exe')),
+            _glob_first(os.path.join(R, 'kun_peng*.exe')),
+            which('kun_peng'), which('kun_peng.exe'),
+        ],
+        # 捆绑副本优先于 PATH：分发版始终用随包 SPAdes，不受对方机器已装版本影响
+        'spades': [_glob_first(os.path.join(T, 'SPAdes*', 'bin', 'spades.bat')),
+                   _glob_first(os.path.join(R, 'SPAdes*', 'bin', 'spades.bat')),
+                   which('spades.bat'), which('spades.py')],
+        'blastn':      [_glob_first(os.path.join(T, 'Blast', 'bin', 'blastn.exe')),
+                        _glob_first(os.path.join(R, 'Blast', 'bin', 'blastn.exe')),      which('blastn')],
+        'makeblastdb': [_glob_first(os.path.join(T, 'Blast', 'bin', 'makeblastdb.exe')),
+                        _glob_first(os.path.join(R, 'Blast', 'bin', 'makeblastdb.exe')), which('makeblastdb')],
+        'blastp':      [_glob_first(os.path.join(T, 'Blast', 'bin', 'blastp.exe')),
+                        _glob_first(os.path.join(R, 'Blast', 'bin', 'blastp.exe')),      which('blastp')],
+        'blastx':      [_glob_first(os.path.join(T, 'Blast', 'bin', 'blastx.exe')),
+                        _glob_first(os.path.join(R, 'Blast', 'bin', 'blastx.exe')),      which('blastx')],
+        'mafft':   [which('mafft'), os.path.join(T, 'mafft-win', 'mafft.bat'),
+                    _glob_first(os.path.join(T, 'mafft-win', 'mafft*.bat')),
+                    os.path.join(R, 'mafft-win', 'mafft.bat'),
+                    _glob_first(os.path.join(R, 'mafft-win', 'mafft*.bat'))],
+        'fasttree': [which('fasttree'), which('FastTree'),
+                     _glob_first(os.path.join(T, 'FastTree', 'FastTree*.exe')),
+                     _glob_first(os.path.join(R, 'FastTree', 'FastTree*.exe'))],
+        'iqtree2': [which('iqtree2'), which('iqtree2.exe'),
+                    _glob_first(os.path.join(T, 'iQtree', '*', 'bin', 'iqtree2.exe')),
+                    _glob_first(os.path.join(T, 'iQtree', '*', 'iqtree2*.exe')),
+                    _glob_first(os.path.join(R, 'iQtree', '*', 'bin', 'iqtree2.exe')),
+                    _glob_first(os.path.join(R, 'iQtree', '*', 'iqtree2*.exe'))],
+        'iqtree3': [which('iqtree3'), which('iqtree3.exe'),
+                    _glob_first(os.path.join(T, 'iQtree', '*', 'bin', 'iqtree3.exe')),
+                    _glob_first(os.path.join(T, 'iQtree', '*', 'iqtree3*.exe')),
+                    _glob_first(os.path.join(R, 'iQtree', '*', 'bin', 'iqtree3.exe')),
+                    _glob_first(os.path.join(R, 'iQtree', '*', 'iqtree3*.exe'))],
+        'trimal':  [which('trimal'), which('trimal.exe'),
+                    os.path.join(T, 'trimAl', 'trimal.exe'),
+                    _glob_first(os.path.join(T, 'trimAl*', 'bin', 'trimal*.exe')),
+                    os.path.join(R, 'trimAl', 'trimal.exe'),
+                    _glob_first(os.path.join(R, 'trimAl*', 'bin', 'trimal*.exe'))],
+        'gblocks': [which('Gblocks'), which('Gblocks.exe'),
+                    os.path.join(T, 'Gblocks', 'Gblocks.exe'),
+                    _glob_first(os.path.join(T, 'Gblocks*', 'Gblocks*.exe')),
+                    os.path.join(R, 'Gblocks', 'Gblocks.exe'),
+                    _glob_first(os.path.join(R, 'Gblocks*', 'Gblocks*.exe'))],
+        'clustalw': [os.path.join(BIN, 'clustalw2.exe'),
+                     os.path.join(R, 'clustalw2.exe'), which('clustalw2')],
+        'muscle':   [_glob_first(os.path.join(BIN, 'muscle*.exe')),
+                     _glob_first(os.path.join(R, 'muscle*.exe')), which('muscle')],
+        'seqkit':   [which('seqkit'), _glob_first(os.path.join(BIN, 'seqkit*.exe')),
+                     _glob_first(os.path.join(R, 'seqkit*.exe'))],
+        'crabz':    [which('crabz'), which('crabz.exe'),
+                     _glob_first(os.path.join(BIN, 'crabz*.exe')),
+                     _glob_first(os.path.join(R, 'crabz*.exe'))],
+        'gbdraw':   [which('gbdraw'), which('gbdraw.exe'),
+                     os.path.join(os.path.dirname(sys.executable), 'Scripts',
+                                  'gbdraw.exe'),
+                     _glob_first(os.path.join(BIN, 'gbdraw*', 'gbdraw*.exe')),
+                     _glob_first(os.path.join(R, 'gbdraw*', 'gbdraw*.exe'))],
+        'orfipy':   [which('orfipy'),
+                     # 打包运行时 Scripts 不一定在 PATH：按当前 Python 推断
+                     os.path.join(os.path.dirname(sys.executable), 'Scripts', 'orfipy.exe')],
+        'diamond':  [os.path.join(T, 'diamond', 'diamond.exe'),
+                     os.path.join(R, 'diamond', 'diamond.exe'), which('diamond'),
+                     which('diamond.exe')],
+        'mmseqs':   [os.path.join(T, 'mmseqs', 'bin', 'mmseqs.exe'),
+                     os.path.join(R, 'mmseqs', 'bin', 'mmseqs.exe'),
+                     which('mmseqs'), which('mmseqs.exe')],
+        'minimap2': [os.path.join(T, 'minimap2', 'minimap2.exe'),
+                     os.path.join(T, 'minimap2', 'minimap2'),
+                     os.path.join(R, 'minimap2', 'minimap2.exe'),
+                     os.path.join(R, 'minimap2', 'minimap2'),
+                     which('minimap2'), which('minimap2.exe')],
+        'fastp':    [which('fastp'), which('fastp.exe'),
+                     _glob_first(os.path.join(T, 'fastp*', 'fastp.exe')),
+                     _glob_first(os.path.join(R, 'fastp*', 'fastp.exe')),
+                     _glob_first(os.path.join(R, 'biosoft', 'fastp*', 'fastp.exe')),
+                     _glob_first(os.path.join(R, 'fastp*.exe'))],
+        'aria2c':   [os.path.join(BIN, 'aria2c.exe'), os.path.join(R, 'aria2c.exe'),
+                     which('aria2c'), which('aria2c.exe')],
+        'sracha':   [os.path.join(BIN, 'sracha.exe'), os.path.join(R, 'sracha.exe'),
+                     which('sracha'), which('sracha.exe')],
+    }
+    out = {name: _first_exist(lst) for name, lst in cands.items()}
+    if getattr(sys, 'frozen', False) and not out.get('gbdraw'):
+        out['gbdraw'] = 'bundled:gbdraw'     # 随包 Python 引擎，进程内调用
+    return out
+
+
+class Config:
+    """全局配置单例。tools 可被 platform.json 覆盖；未探测到的工具调用时报错。"""
+
+    # 分析默认参数的定义（键 → 类型/默认/中英说明）；设置页据此渲染
+    DEFAULT_FIELDS = [
+        # key, 类型, 默认, 中文说明, 英文说明[, 选项]
+        ('confidence',    'float',  0.0,        '分类置信度（0~1，越大越严格）',
+         'Classification confidence (0-1)'),
+        ('subsample',     'int',    0,          '默认子采样 reads 对数（0=不截取）',
+         'Default subsample pairs (0 = all)'),
+        ('fastp_dedup',   'bool',   False,      'Fastp 质控默认去重 (--dedup)',
+         'Dedup by default in fastp QC'),
+        ('do_fq2fa',      'bool',   True,       '默认 FASTQ→FASTA 预转换（分类提速）',
+         'FASTQ to FASTA pre-conversion by default'),
+        ('assembly_mode', 'select', 'metaviral', 'SPAdes 组装模式',
+         'SPAdes assembly mode',
+         ['metaviral', 'rna', 'meta', 'isolate']),
+        ('assembly_input','select', 'virus',    '组装输入 reads',
+         'Assembly input reads',
+         ['virus', 'kept', 'raw']),
+        ('memory',        'int',    64,         'SPAdes 内存上限 (GB)',
+         'SPAdes memory cap (GB)'),
+        ('min_contig_len','int',    200,        '最小 contig 长度 (bp)',
+         'Min contig length (bp)'),
+        ('min_orf_aa',    'int',    100,        '最小 ORF 长度 (aa)',
+         'Min ORF length (aa)'),
+        ('top_n_refs',    'int',    10,         '进化分析近缘参考数',
+         'Closest references for phylogenetics'),
+        ('tree_tool',     'select', 'fasttree', '建树工具',
+         'Tree building tool', ['fasttree', 'iqtree']),
+        ('tree_sampling', 'select', 'blast',    '建树参考抽样策略',
+         'Tree reference sampling', ['blast', 'macro', 'genus', 'lineage']),
+        ('primer_mode',   'select', 'conserved', '引物设计模式',
+         'Primer design mode', ['conserved', 'plain']),
+        ('specificity',   'bool',   False,      '引物宿主特异性检查（首次较慢）',
+         'Primer host-specificity check'),
+        ('gbdraw_max',    'int',    12,         '基因组图出图上限（条）',
+         'Genome plot limit (contigs)'),
+        ('plot_engine',   'select', 'auto',     '基因组图引擎',
+         'Genome plot engine', ['auto', 'gbdraw', 'dfv']),
+        ('force',         'bool',   False,      '默认强制重跑（忽略断点）',
+         'Force re-run by default'),
+        ('do_trim',       'bool',   True,       '⑦ 建树前用 trimAl 清剪比对',
+         'Trim alignment with trimAl before tree building'),
+    ]
+
+    def __init__(self):
+        self.threads = max(1, (os.cpu_count() or 4) - 1)
+        self.tools = detect_tools()
+        self.email = ''            # NCBI EUtils 联系邮箱（可选，礼貌性参数）
+        self.language = 'zh'       # 界面语言: zh | en
+        # 分析默认参数（预填硬编码缺省，platform.json 的已存值在 _load_extras 覆盖）
+        self.defaults = {k: v for k, _t, v, *_r in self.DEFAULT_FIELDS}
+        self.databases = {
+            'host':  db_path('host', 'classify'),
+            'virus': db_path('virus', 'plant'),
+        }
+        self.output_root = ''      # 自定义输出根（'' = 平台目录内）
+        self.input_root = ''       # 自定义输入根（fastq / uploads）
+        self.database_root = ''    # 自定义数据库根（databases / host-db / virus-db）
+        self._db_override = {}
+        # 使用者登记的外部已构建 kunpeng 病毒库（绝对路径，平台内/数据库根优先）
+        self.extra_virus_libs = []
+        self._load()
+        for attr, apply_fn in (('input_root', apply_input_root),
+                               ('database_root', apply_database_root),
+                               ('output_root', apply_output_root)):
+            path = getattr(self, attr)
+            if path:
+                try:
+                    setattr(self, attr, apply_fn(path))
+                except (OSError, ValueError):
+                    setattr(self, attr, '')
+        # 数据库实际路径按（可能已迁移的）数据库根重算；
+        # platform.json 的 databases 显式覆盖：仅当该路径真实存在时生效
+        # （迁移后旧路径不存在则回退注册表解析，自动切到新分类路径）。
+        self.databases = {
+            'host':  db_path('host', 'classify'),
+            'virus': db_path('virus', 'plant'),
+        }
+        for k, v in (getattr(self, '_db_override', {}) or {}).items():
+            if not v:
+                continue
+            pv = os.path.normpath(os.path.abspath(v))
+            if not os.path.isdir(pv):
+                continue
+            if any(pv == os.path.normpath(r)
+                   or pv.startswith(os.path.normpath(r) + os.sep)
+                   for r in write_roots()):
+                self.databases[k] = pv
+        for d in ('databases', 'taxonomy', 'results', 'downloads', 'logan',
+                  'submissions', 'meta_search', 'tasks', 'logs'):
+            os.makedirs(DIRS[d], exist_ok=True)
+
+    # ---- 持久化 -------------------------------------------------
+    def _load(self):
+        if not os.path.isfile(CONFIG_FILE):
+            return
+        try:
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            self._load_extras(data)
+            self.output_root = str(data.get('output_root') or '').strip()
+            self.input_root = str(data.get('input_root') or '').strip()
+            self.database_root = str(data.get('database_root') or '').strip()
+            # threads: 0 / 缺省 = 自动探测（cpu 核数 - 1，见 __init__）；
+            # 显式 >0 才采用——干净发布配置里写 0 不应钳成单线程
+            try:
+                _t = int(data.get('threads') or 0)
+            except (TypeError, ValueError):
+                _t = 0
+            if _t > 0:
+                self.threads = _t
+            if data.get('email'):
+                self.email = str(data['email'])
+            for k, v in data.get('tools', {}).items():
+                if v and os.path.isfile(v):
+                    self.tools[k] = os.path.abspath(v)
+            # databases 覆盖延后到根目录应用之后再校验（见 __init__）
+            self._db_override = {k: str(v).strip()
+                                 for k, v in data.get('databases', {}).items()
+                                 if v}
+            libs = []
+            for v in (data.get('extra_virus_libs') or []):
+                v = os.path.normpath(os.path.abspath(str(v).strip()))
+                if v and os.path.isdir(v):
+                    libs.append(v)
+            self.extra_virus_libs = libs
+        except Exception:
+            pass
+
+    def save(self):
+        data = {'threads': self.threads, 'tools': self.tools,
+                'databases': self.databases,
+                'defaults': self.defaults, 'language': self.language,
+                'output_root': self.output_root,
+                'input_root': self.input_root,
+                'database_root': self.database_root,
+                'extra_virus_libs': self.extra_virus_libs}
+        if self.email:
+            data['email'] = self.email
+        # 原子写：先写临时文件再替换，断电/崩溃不会损坏现有配置
+        tmp = CONFIG_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, CONFIG_FILE)
+
+    # ---- 语言 ---------------------------------------------------
+    @property
+    def lang(self):
+        return 'en' if self.language == 'en' else 'zh'
+
+    def set_input_root(self, path):
+        """设置自定义输入根（'' = 恢复默认平台目录），持久化并立即生效。"""
+        path = (path or '').strip()
+        if path and not os.path.isabs(path):
+            raise ValueError('输入目录需为绝对路径')
+        self.input_root = apply_input_root(path)
+        self.save()
+
+    def set_database_root(self, path):
+        """设置自定义数据库根（'' = 恢复默认平台目录），持久化并立即生效；
+        数据库实际路径（host_db/virus_db）按新根重算。"""
+        path = (path or '').strip()
+        if path and not os.path.isabs(path):
+            raise ValueError('数据库目录需为绝对路径')
+        self.database_root = apply_database_root(path)
+        self.databases = {
+            'host':  db_path('host', 'classify'),
+            'virus': db_path('virus', 'plant'),
+        }
+        self.save()
+
+    def set_output_root(self, path):
+        """设置自定义输出根（'' = 恢复默认平台目录），持久化并立即生效。"""
+        path = (path or '').strip()
+        if path and not os.path.isabs(path):
+            raise ValueError('输出目录需为绝对路径（如 D:\\我的分析结果）')
+        self.output_root = apply_output_root(path)
+        self.save()
+
+    def tr(self, zh, en):
+        """按当前语言取字符串（后端动态文案用）。"""
+        return en if self.lang == 'en' else zh
+
+    def _load_extras(self, data):
+        """非路径类配置：界面语言与分析默认参数（值均为标量，逐项校验类型）。"""
+        try:
+            if data.get('language') in ('zh', 'en'):
+                self.language = data['language']
+            known = {kk: t for kk, t, *_r in self.DEFAULT_FIELDS}
+            for k, v in (data.get('defaults') or {}).items():
+                if k not in known or v is None:
+                    continue
+                kind = known[k]
+                try:
+                    if kind == 'int':
+                        self.defaults[k] = int(v)
+                    elif kind == 'float':
+                        self.defaults[k] = float(v)
+                    elif kind == 'bool':
+                        self.defaults[k] = bool(v)
+                    else:
+                        self.defaults[k] = str(v)
+                except (TypeError, ValueError):
+                    pass
+        except Exception:
+            pass
+
+    # ---- 工具 ---------------------------------------------------
+    def tool(self, name):
+        path = self.tools.get(name)
+        if path and path.startswith('bundled:'):
+            return path          # 随包 Python 引擎哨兵，由调用方进程内处理
+        if not path or not os.path.isfile(path):
+            raise FileNotFoundError(
+                f"未找到工具 [{name}]。请在平台配置(platform.json 或 GUI 设置页)中手动指定路径。")
+        return path
+
+    def tool_status(self):
+        """GUI 用：返回各工具探测状态。"""
+        return dict(self.tools)
+
+    def ensure_dir(self, key):
+        d = DIRS[key]
+        os.makedirs(d, exist_ok=True)
+        return d
+
+
+_config = None
+
+def get_config():
+    global _config
+    if _config is None:
+        _config = Config()
+    return _config

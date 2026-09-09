@@ -1,0 +1,40 @@
+flask>=3.0
+biopython>=1.80
+pandas>=2.0
+numpy>=1.24            # 数值计算（phylo/sdt/viz 直接 import，此前仅靠传递依赖）
+matplotlib>=3.7        # 绘图（dfv_plot/viz/landscape_plot 直接 import）
+scipy>=1.10            # SDT 层级聚类排序
+Jinja2>=3.1            # NCBI 提交报告渲染（提交准备模块直接 import）
+Werkzeug>=2.3          # app.py 异常类型（flask 依赖，显式声明更稳）
+urllib3>=1.26          # 公共数据检索（meta 引擎重试策略）
+PyYAML>=6.0            # NCBI 提交配置 .yaml 解析
+defusedxml>=0.7        # NCBI XML 安全解析（有手动兜底，属安全增强）
+plotly>=5.18
+pycirclize>=1.0
+orfipy>=0.0.4
+pyrodigal>=2.0
+pyrodigal-rv>=1.0; platform_system == "Windows"
+primer3-py>=2.0
+tqdm>=4.60
+kaleido>=0.2
+# ⑥b ORF 功能注释 HMM 层（层2；Windows 原生 wheel，自带 HMMER3 实现）
+pyhmmer>=0.11
+# LOGAN 溯源「一键批量提交」依赖（方式二；未安装时该功能灰显，手动方式不受影响）
+selenium>=4.15
+# 病毒基因组图（⑨ 基因组图阶段，DFV 备选引擎，纯 Python）
+dna_features_viewer>=3.1
+# ── 公共数据检索模块（meta_search，源自 MMPV-RNA public_metadata_pipeline）──
+requests>=2.28
+xmltodict>=0.13
+openpyxl>=3.1
+seaborn>=0.12
+# AI 元数据清洗（可选：仅 meta-search / meta-info 传 --deepseek-api 时需要）
+# openai>=1.30
+# 病毒基因组图（⑨ 基因组图阶段首选引擎，圈图更精美；PyPI 无包，从 GitHub 安装）
+# python -m pip install git+https://github.com/satoshikawato/gbdraw.git
+# ⑥ 同属比较可选外接引擎（LoVis4u 原生 PDF 图；平台运行器已修补其 Windows 兼容 bug）
+# python -m pip install lovis4u
+# 共线性配色 / Krona 旭日图（distinctipy / taxburst，缺失时自动回退内置色板与 plotly 旭日图）
+# python -m pip install distinctipy taxburst
+# 加速工具（可选，放平台根目录即可被自动探测）：crabz.exe（Rust 多线程 gzip）
+# https://github.com/sstadick/crabz/releases

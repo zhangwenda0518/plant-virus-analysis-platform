@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="vp-lang" content="{{ lang }}">
+<title>公共病毒组 - 植物病毒分析平台</title>
+<script>try{if(localStorage.getItem("vp_theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
+<link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
+<style>
+  html, body { height: 100%; }
+  /* 高度由 app.css 的 .virome-shell（纵向 flex）分配：
+     顶条自适应，iframe 占满剩余视口 */
+  .virome-frame-wrap iframe { width: 100%; height: 100%; border: 0;
+                             display: block; background: #f4f6f8; }
+</style>
+</head>
+<body>
+{% include "_nav.html" %}
+
+<div class="virome-shell">
+  {% include "_group_nav.html" %}
+  <div class="virome-frame-wrap">
+  <!-- Open-Virome SPA（同源嵌入）；筛选条件在 URL 参数中，双向同步便于收藏/分享 -->
+  <iframe id="viromeFrame" src="/virome/" title="公共病毒组数据库"
+          allow="clipboard-write"></iframe>
+</div>
+</div>
+
+<script src="/static/i18n.js?v={{ asset_v }}"></script>
+<script>
+(function () {
+  var frame = document.getElementById('viromeFrame');
+
+  // 进入时：把平台页 URL 上的查询参数透传给内嵌应用
+  if (location.search.length > 1) {
+    frame.src = '/virome/' + location.search;
+  }
+
+  // 内嵌应用的查询变化 → 同步回平台页 URL（history.replaceState，不刷新）
+  setInterval(function () {
+    try {
+      var q = frame.contentWindow.location.search;
+      var target = '/virome' + (q || '');
+      if (location.pathname + location.search !== target) {
+        history.replaceState(null, '', target);
+      }
+    } catch (e) { /* 同源嵌入不会触发；防御性忽略 */ }
+  }, 800);
+})();
+</script>
+</body>
+</html>

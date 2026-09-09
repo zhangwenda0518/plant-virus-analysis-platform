@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>功能注释 - 植物病毒分析平台</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="vp-lang" content="{{ lang }}">
+<script>try{if(localStorage.getItem("vp_theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
+<link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
+</head>
+<body>
+{% include "_nav.html" %}
+
+<div class="page">
+  <div class="tools-layout group-layout">
+    {% include "_group_nav.html" %}
+    <main class="group-main">
+  <div class="layout">
+    <div class="col">
+      <div class="card">
+        <h1 data-i18n="an.title">🧾 功能注释</h1>
+        <p class="hint" data-i18n="an.hint">独立模块：ORF 蛋白对照 RefSeq 病毒蛋白库
+        （DIAMOND / MMseqs2 / blastp 任一，自动探测）+ 类别投票 + ICTV 映射。
+        可对已有「ORF 预测」运行直接注释，也可输入 FASTA 一步完成
+        （预测 + 注释）。首次运行自动下载 RefSeq 病毒蛋白库 ~107MB，之后全缓存。
+        CDS 基因模型默认 pyrodigal-rv（RNA/反转录病毒），可按需切换 pyrodigal
+        （meta 基因模型）。</p>
+
+        <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:end;margin:14px 0 4px">
+          <div class="gp-item">
+            <label data-i18n="an.methodLabel">注释方法（搜索引擎）</label>
+            <select id="oa_engine">
+              <option value="" data-i18n="an.engineAuto">自动探测（DIAMOND → MMseqs2 → blastp）</option>
+              <option value="diamond" data-i18n="an.engineDiamond">DIAMOND（推荐）</option>
+              <option value="mmseqs">MMseqs2</option>
+              <option value="blastp">BLAST+ blastp</option>
+            </select>
+          </div>
+          <div class="gp-item">
+            <label data-i18n="an.dbLabel">参考数据库</label>
+            <select id="oa_db" onchange="$('oa_db_custom').style.display = this.value === 'custom' ? '' : 'none'">
+              <option value="" data-i18n="an.dbRefseq">RefSeq 病毒蛋白库（默认）</option>
+              <option value="custom" data-i18n="an.dbCustom">自备本地蛋白 FASTA…</option>
+            </select>
+          </div>
+          <div class="gp-item">
+            <label data-i18n="an.modelLabel">CDS 基因模型</label>
+            <select id="oa_model">
+              <option value="" data-i18n="an.modelRv">pyrodigal-rv（默认，RNA/反转录病毒）</option>
+              <option value="pyrodigal" data-i18n="an.modelMeta">pyrodigal（meta 基因模型）</option>
+            </select>
+          </div>
+          <div class="filerow" id="oa_db_custom" style="display:none">
+            <input id="oa_db_fa" type="text" data-i18n-ph="an.dbFaPh" placeholder="自备蛋白库 .faa">
+            <button class="btn small" onclick="browse('oa_db_fa')">📁</button>
+          </div>
+        </div>
+
+        <h2 style="margin:14px 0 6px" data-i18n="an.modeA">方式 A · 对已有 ORF 运行做注释</h2>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="oa_run" style="max-width:420px">
+            <option value="" data-i18n="an.pickRun">（选择 orf_ 运行）</option>
+          </select>
+          <button class="btn small" onclick="loadOrfRuns(true)" data-i18n="c.refreshBtn">↻ 刷新</button>
+          <button class="btn small" onclick="loadOrfRuns(true); toast(t('an.pickedLatest','已选最新 ORF 运行'), $('oa_run').value, {ttl:2500})" data-i18n="c.example">✨ 示例</button>
+        </div>
+        <div style="margin-top:8px">
+          <button class="btn primary" onclick="runAnnotRun(this)" data-i18n="an.runSel">▶ 注释该运行</button>
+        </div>
+
+        <h2 style="margin:20px 0 6px" data-i18n="an.modeB">方式 B · 输入 FASTA（预测 + 注释一步完成）</h2>
+        <label data-i18n="an.faLabel">输入 FASTA（核酸，支持 .gz）</label>
+        <div class="filerow">
+          <input id="oa_fa" type="text" data-i18n-ph="an.faPh" placeholder="选择 .fasta / .fna[.gz]">
+          <button class="btn small" onclick="browse('oa_fa')">📁</button>
+          <button class="btn small" onclick="pasteSeq('oa_fa', '.fasta')" title="粘贴 FASTA" data-i18n-title="an.pasteFa">📋</button>
+          <button class="btn small" onclick="fillExample('oa_fa')" title="填入内置示例" data-i18n-title="an.fillExampleTitle" data-i18n="c.example">✨ 示例</button>
+        </div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:6px">
+          <div class="gp-item">
+            <label data-i18n="an.minAa">最短 ORF 长度（aa）</label>
+            <input id="oa_min" type="number" value="100" min="30">
+          </div>
+          <div class="gp-item">
+            <label data-i18n="an.threads">线程数（留空=自动）</label>
+            <input id="oa_threads" type="number" min="1" data-i18n-ph="an.autoPh" placeholder="自动">
+          </div>
+        </div>
+        <div style="margin-top:10px">
+          <button class="btn primary" onclick="runAnnotFasta(this)" data-i18n="an.runFasta">▶ 预测并注释</button>
+        </div>
+
+        <div class="tool-out">
+          <div class="tool-out-head" data-i18n="c.outHead">📤 输出</div>
+          <div class="toolrun" id="toolrun-orfa"></div>
+        </div>
+        <p class="hint" data-i18n="an.artifacts">产物（运行目录 orfa_ 开头 / 结果中心可查）：
+        orf_annotation.tsv、功能类别 / 科分布、注释 GFF3。</p>
+      <div class="rh" id="rh-orfa"></div>
+      </div>
+    </div>
+  </div>
+    </main>
+  </div>
+</div>
+
+<!-- 文件/目录选择对话框 -->
+<div id="dlgMask" class="dlgmask" style="display:none">
+  <div class="dlg">
+    <div class="dlghead"><b data-i18n="c.chooseFile">选择文件</b>
+      <button class="btn small" onclick="closeDlg()">✕</button></div>
+    <div id="dlgPath" class="dlgpath"></div>
+    <div id="dlgList" class="dlglist"></div>
+    <div id="dlgPickDir" style="display:none;padding:10px 16px;border-top:1px solid var(--line-100);text-align:right">
+      <button class="btn small primary" onclick="pickDir()" data-i18n="c.pickDir">选择此目录 ✔</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/i18n.js?v={{ asset_v }}"></script>
+<script src="/static/app.js?v={{ asset_v }}"></script>
+<script>
+/* $ / esc / browse / pasteSeq / fillExample / toast / startPolling / taskLogOpen 均来自 app.js */
+
+function val(id) { return ($(id)?.value || '').trim(); }
+
+async function loadOrfRuns(auto) {
+  try {
+    const r = await fetch('/api/tool/runs');
+    const runs = (await r.json()).filter(x => x.name.startsWith('orf_')
+      && JSON.stringify(x.files || []).includes('03_assembly'));
+    const sel = $('oa_run');
+    const cur = sel.value;
+    sel.innerHTML = runs.length
+      ? runs.map(x => `<option value="${esc(x.name)}">${esc(x.name)}</option>`).join('')
+      : `<option value="">${t('an.noOrfRun','（暂无 orf_ 运行——先到「ORF 预测」跑一次，或用方式 B）')}</option>`;
+    if (auto && runs.length) sel.value = runs[0].name;
+    else if (cur && runs.some(x => x.name === cur)) sel.value = cur;
+  } catch (e) { /* 忽略 */ }
+}
+
+async function _runOrfa(params, btn) {
+  try {
+    const r = await fetch('/api/tool/run', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tool: 'orfa',
+                             threads: +val('oa_threads') || null, params })});
+    if (!r.ok) { alert(t('an.startFail','启动失败: ') + ((await r.json()).error || '')); return; }
+    const d = await r.json();
+    taskLogOpen.add(d.task);
+    startPolling();
+    watchTaskBtn(d.task, btn, t('an.busy','⏳ 注释中…'));
+  } catch (e) { alert(t('an.connFail','无法连接平台服务: ') + e); }
+}
+
+function annotDbParams(p) {
+  const eng = val('oa_engine');
+  if (eng) p.engine = eng;
+  const mdl = val('oa_model');
+  if (mdl) p.model = mdl;
+  const dbk = val('oa_db');
+  if (dbk === 'custom') {
+    const fa = val('oa_db_fa');
+    if (!fa) { alert(t('an.needDbFa','请选择自备蛋白库 .faa（或改回 RefSeq 默认库）')); return null; }
+    p.db = fa;
+  }
+  return p;
+}
+function runAnnotRun(btn) {
+  const run = val('oa_run');
+  if (!run) { alert(t('an.needRun','请选择已有 ORF 运行（或改用方式 B 输入 FASTA）')); return; }
+  const p = annotDbParams({ run });
+  if (p) _runOrfa(p, btn);
+}
+
+function runAnnotFasta(btn) {
+  if (!val('oa_fa')) { alert(t('an.needFa','请选择输入 FASTA')); return; }
+  const p = annotDbParams({ fasta: val('oa_fa'), min_aa: +val('oa_min') || 100 });
+  if (p) _runOrfa(p, btn);
+}
+
+loadOrfRuns(false);
+startPolling();
+</script>
+</body>
+</html>

@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="vp-lang" content="{{ lang }}">
+<title>LOGAN 溯源 - 植物病毒分析平台</title>
+<script>try{if(localStorage.getItem("vp_theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
+<link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
+</head>
+<body>
+{% include "_nav.html" %}
+
+<div class="page">
+  <div class="tools-layout group-layout">
+    {% include "_group_nav.html" %}
+    <main class="group-main">
+  <div class="hero">
+    <h1 data-i18n="lg.title">🌐 LOGAN 溯源</h1>
+    <p data-i18n="lg.intro">把鉴定到的病毒序列提交到 <b>Logan-Search</b>（logan-search.org，NCBI SRA 全量组装的
+       k-mer 索引，覆盖约 2340 万公共样本），回答「这条病毒在<b>哪些物种和样本</b>中真实存在」，
+       并与平台 ④ICTV 宿主预测交叉验证。支持 <b>一键批量自动提交</b> 与 <b>手动半自动</b> 两种方式。</p>
+  </div>
+
+  <div class="card" id="flowCard">
+    <h2 class="flow-head" id="flowHead" onclick="toggleFlow()" role="button"
+        aria-expanded="true" title="点击折叠/展开">
+      <span id="flowArrow">▼</span> <span data-i18n="lg.flow">使用流程</span>
+      <span class="flow-tip" data-i18n="lg.flowTip">方式一 · 一键批量 ｜ 方式二 · 手动半自动（点击标题折叠/展开）</span>
+    </h2>
+    <div class="flow-body" id="flowBody">
+      <div class="subh"><span class="mode-tag mode-a">方式一 · 一键批量（推荐）</span><span data-i18n="lg.modeANote">需 selenium（pip install selenium）与本机 Edge/Chrome</span></div>
+      <div class="step"><b>1</b><div data-i18n="lg.stepA1">下方新建查询：选样品的病毒 contigs（或粘贴序列），平台自动切成 ≤2.5kb 的查询片段。</div></div>
+      <div class="step"><b>2</b><div data-i18n="lg.stepA2">任务卡片里填<b>通知邮箱</b>、选 Groups → 点「一键批量提交」。平台自动打开本机浏览器逐条提交、轮询等结果、下载结果表并<b>自动导入生成报告</b>，全程无需盯守。</div></div>
+      <div class="step"><b>3</b><div data-i18n="lg.stepA3">个别片段因超时未落定？<b>再点一次批量提交即可补漏</b>（已下载的片段自动跳过）。</div></div>
+      <div class="subh"><span class="mode-tag mode-b">方式二 · 手动半自动</span><span data-i18n="lg.modeBNote">不装 selenium 也能用</span></div>
+      <div class="step"><b>1</b><div data-i18n="lg.stepB1">每个片段点「复制序列」→ 点「打开 Logan-Search」粘贴提交；Groups 建议 <b>All_No_viral_human</b>（快速预检用 Fast），Threshold 默认 0.25；<b>建议填邮箱</b>拿结果下载链接。</div></div>
+      <div class="step"><b>2</b><div data-i18n="lg.stepB2">把结果表（CSV/TSV）下载到本地，回点对应片段的「导入结果」。</div></div>
+      <p class="hint" data-i18n="lg.selfHint">平台自身不发起任何外部请求（批量方式由本机浏览器代为访问 logan-search.org）；使用请引用：Chikhi et al. 2025, bioRxiv 10.1101/2024.07.30.605881。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 data-i18n="lg.create">① 新建溯源查询</h2>
+    <div class="grid2">
+      <div>
+        <label class="req" data-i18n="lg.jobName">查询名称</label>
+        <input type="text" id="jobName" data-i18n-ph="lg.jobNamePh" placeholder="如 NX-5-CRSV 或 病毒名_日期">
+      </div>
+      <div>
+        <label data-i18n="lg.nSeg">每条 contig 切片段数（长 contig 多点取样提高召回）</label>
+        <select id="nSeg">
+          <option value="1" data-i18n="lg.seg1">1 段（正中 2.5kb，1 次提交）</option>
+          <option value="2" selected data-i18n="lg.seg2">2 段（首尾分布，2 次提交）</option>
+          <option value="3" data-i18n="lg.seg3">3 段（均匀铺开，3 次提交）</option>
+          <option value="4" data-i18n="lg.seg4">4 段（最全，4 次提交）</option>
+        </select>
+      </div>
+    </div>
+    <label data-i18n="lg.src">序列来源</label>
+    <div class="chk"><input type="radio" name="src" id="srcSample" checked onchange="toggleSrc()"> <span data-i18n="lg.srcSample">从平台样品的病毒 contigs 选择</span></div>
+    <div class="chk"><input type="radio" name="src" id="srcPaste" onchange="toggleSrc()"> <span data-i18n="lg.srcPaste">粘贴 FASTA / 纯序列（任意来源）</span></div>
+
+    <div id="sampleArea">
+      <label class="req" data-i18n="lg.sample">样品（需已完成 ③组装 并产出病毒 contigs）</label>
+      <select id="sampleSel" onchange="loadContigs()"><option value="" data-i18n="lg.loading">加载中…</option></select>
+      <div class="scroll-sm" id="contigWrap" style="margin-top:8px"></div>
+      <div>
+        <button class="btn small" onclick="checkAll(true)" data-i18n="lg.selectAll">全选</button>
+        <button class="btn small" onclick="checkAll(false)" data-i18n="lg.clearAll">清空</button>
+        <span class="hint" data-i18n="lg.segHint">≤2.5kb 的 contig 只产生 1 个片段（1 次提交）</span>
+      </div>
+    </div>
+
+    <div id="pasteArea" style="display:none">
+      <label class="req" data-i18n="lg.paste">粘贴序列（FASTA 或纯 ACGT，≤2.5kb 直接整条提交）</label>
+      <textarea id="pasteSeq" rows="6" style="width:100%;font-family:Consolas,monospace;font-size:12px"
+                placeholder=">my_virus&#10;ACGTACGT..."></textarea>
+    </div>
+
+    <button class="btn primary big" onclick="createJob()" data-i18n="lg.genBtn">生成查询片段</button>
+    <div class="err" id="createErr"></div>
+  </div>
+
+  <h2 class="sec" data-i18n="lg.jobs">② 我的查询任务</h2>
+  <div id="jobList"><p class="hint" data-i18n="lg.loading">加载中…</p></div>
+  </main>
+  </div>
+</div>
+
+<script src="/static/i18n.js?v={{ asset_v }}"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+let GROUPS = [['Fast_No_human', '快速子集且排除人源（默认）'], ['All_No_viral_human', '全部排除人源病毒'], ['Fast', '快速子集'], ['All', '全部样本']];
+let SELENIUM = true;
+let batchTasks = {};        // jobname -> task snapshot（来自 /api/tasks）
+
+function toggleSrc() {
+  $('sampleArea').style.display = $('srcSample').checked ? '' : 'none';
+  $('pasteArea').style.display = $('srcPaste').checked ? '' : 'none';
+}
+
+async function loadBatchReady() {
+  try {
+    const r = await (await fetch('/api/logan/batch_ready')).json();
+    SELENIUM = !!r.selenium;
+    if (Array.isArray(r.groups) && r.groups.length) GROUPS = r.groups;
+  } catch (e) {}
+}
+
+async function loadSamples() {
+  try {
+    const list = await (await fetch('/api/logan/samples')).json();
+    const sel = $('sampleSel');
+    sel.innerHTML = list.length
+      ? list.map(s => `<option value="${esc(s.name)}">${esc(s.name)}${t('lg.nContigs').replace('{n}', s.n_contigs)}</option>`).join('')
+      : `<option value="">${t('lg.noSample')}</option>`;
+    if (list.length) loadContigs();
+  } catch (e) { $('sampleSel').innerHTML = `<option value="">${t('lg.loadFail')}</option>`; }
+}
+
+/* 表格分页：每页 20 行（本页不加载 app.js，自带轻量分页器） */
+const PER_PAGE = 20;
+let ctRows = [], ctPageN = 1, ctSel = new Set();
+function pagerHtml(page, totalPages, fnExpr) {
+  totalPages = Math.max(1, Math.floor(totalPages || 1));
+  if (totalPages <= 1) return '';
+  page = Math.min(Math.max(1, page || 1), totalPages);
+  const call = p => fnExpr.includes('{p}') ? fnExpr.replace('{p}', p) : `${fnExpr}(${p})`;
+  const nums = [];
+  for (let n = 1; n <= totalPages; n++) {
+    if (n === 1 || n === totalPages || Math.abs(n - page) <= 2) nums.push(n);
+  }
+  let html = `<div class="pager" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;margin:8px 0">`
+    + `<button class="btn small" ${page <= 1 ? 'disabled' : ''} onclick="${call(page - 1)}">◀</button>`;
+  let prev = 0;
+  for (const n of nums) {
+    if (n - prev > 1) html += '<span class="hint">…</span>';
+    html += `<button class="btn small${n === page ? ' primary' : ''}" onclick="${call(n)}">${n}</button>`;
+    prev = n;
+  }
+  html += `<button class="btn small" ${page >= totalPages ? 'disabled' : ''} onclick="${call(page + 1)}">▶</button>`
+    + `<span class="hint" style="margin-left:4px">${t('lg.pageInfo').replace('{p}', page).replace('{t}', totalPages)}</span></div>`;
+  return html;
+}
+
+async function loadContigs() {
+  const s = $('sampleSel').value;
+  const wrap = $('contigWrap');
+  if (!s) { wrap.innerHTML = ''; return; }
+  wrap.innerHTML = `<p class="hint">${t('lg.loadingCt')}</p>`;
+  try {
+    ctRows = await (await fetch('/api/logan/contigs/' + encodeURIComponent(s))).json();
+    ctPageN = 1;
+    if (!ctRows.length) { wrap.innerHTML = `<p class="hint">${t('lg.noCt')}</p>`; return; }
+    ctSel = new Set(ctRows.slice(0, 3).map(r => r.contig));   // 默认勾选前 3 条
+    renderContigs();
+  } catch (e) { wrap.innerHTML = `<p class="hint">${t('lg.ctFail')}</p>`; }
+}
+
+function ctGo(p) { ctPageN = p; renderContigs(); }
+let ctSort = { key: '', dir: 1 };
+const CT_COLS = [['contig', 'Contig'], ['length', '长度', 1],
+  ['species', '物种'], ['family', '科']];
+function ctSortBy(k) {
+  if (ctSort.key === k) ctSort.dir = -ctSort.dir;
+  else { ctSort.key = k; ctSort.dir = 1; }
+  renderContigs();
+}
+
+function renderContigs() {
+  const wrap = $('contigWrap');
+  let sorted = ctRows.slice();
+  if (ctSort.key) {
+    sorted.sort((a, b) => {
+      const va = a[ctSort.key], vb = b[ctSort.key];
+      const na = parseFloat(va), nb = parseFloat(vb);
+      const c = (!isNaN(na) && !isNaN(nb)) ? na - nb
+        : String(va || '').localeCompare(String(vb || ''), 'zh');
+      return c * ctSort.dir;
+    });
+  }
+  const pages = Math.max(1, Math.ceil(sorted.length / PER_PAGE));
+  ctPageN = Math.min(Math.max(1, ctPageN), pages);
+  const rows = sorted.slice((ctPageN - 1) * PER_PAGE, ctPageN * PER_PAGE);
+  wrap.innerHTML = '<table class="contig-table"><thead><tr><th></th>' +
+    CT_COLS.map(([k, label]) =>
+      `<th class="sortable" onclick="ctSortBy('${k}')">${label}${ctSort.key === k ? (ctSort.dir === 1 ? ' ▲' : ' ▼') : ''}</th>`).join('') +
+    '</tr></thead><tbody>' +
+    rows.map(r => `<tr>
+      <td><input type="checkbox" class="ctck" value="${esc(r.contig)}" ${ctSel.has(r.contig) ? 'checked' : ''}></td>
+      <td title="${esc(r.contig)}">${esc(r.contig.length > 34 ? r.contig.slice(0, 31) + '…' : r.contig)}</td>
+      <td>${(+r.length).toLocaleString()}</td>
+      <td>${esc(r.species || '—')}</td><td>${esc(r.family || '—')}</td></tr>`).join('') +
+    '</tbody></table>' +
+    `<p class="hint">${t('lg.selInfo').replace('{s}', ctSel.size).replace('{t}', ctRows.length).replace('{p}', PER_PAGE)}</p>` +
+    pagerHtml(ctPageN, pages, 'ctGo');
+}
+
+/* 勾选状态跨页保留（事件委托） */
+document.getElementById('contigWrap')?.addEventListener('change', e => {
+  if (e.target.classList && e.target.classList.contains('ctck')) {
+    if (e.target.checked) ctSel.add(e.target.value);
+    else ctSel.delete(e.target.value);
+  }
+});
+
+function checkAll(on) {
+  ctSel = on ? new Set(ctRows.map(r => r.contig)) : new Set();
+  renderContigs();
+}
+
+async function createJob() {
+  $('createErr').textContent = '';
+  const contigs = [...ctSel];
+  const body = {
+    name: $('jobName').value.trim(),
+    n_seg: +$('nSeg').value,
+  };
+  if ($('srcPaste').checked) body.fasta = $('pasteSeq').value;
+  else { body.sample = $('sampleSel').value; body.contigs = contigs; }
+  if (!body.name) { $('createErr').textContent = '请填写查询名称'; return; }
+  const res = await fetch('/api/logan/create', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)});
+  if (!res.ok) {
+    let m = '创建失败';
+    try { m = (await res.json()).error || m; } catch (e) {}
+    $('createErr').textContent = m; return;
+  }
+  $('jobName').value = ''; $('pasteSeq').value = '';
+  loadJobs();
+}
+
+function statusChip(j) {
+  if (!j.n_segments) return '';
+  if (j.n_imported >= j.n_segments) return '<span class="seg-status done">结果齐全</span>';
+  if (j.n_imported > 0) return '<span class="seg-status wait">已导入 ' + j.n_imported + '/' + j.n_segments + '</span>';
+  return '<span class="seg-status wait">待提交</span>';
+}
+
+/* ---------- 批量自动提交 ---------- */
+function groupsOptions(sel) {
+  return GROUPS.map(g => {
+    const v = Array.isArray(g) ? g[0] : g;
+    const label = Array.isArray(g) ? (v + ' — ' + g[1]) : v;
+    return `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(label)}</option>`;
+  }).join('');
+}
+
+function batchPanelHtml(name) {
+  if (!SELENIUM) {
+    return `<div class="batch-panel" id="bp-panel-${esc(name)}"><div class="bp-title">🚀 一键批量提交（未启用）</div>
+      <div class="hint">${t('lg.noSel')} <b>python -m pip install selenium</b>${t('lg.noSelTail')}</div></div>`;
+  }
+  const bt = batchTasks[name];
+  if (bt && bt.status === 'running') {
+    const pct = Math.max(2, Math.min(98, Math.round((bt.pct || 0) * 100)));
+    const logTail = (bt.log || []).slice(-6).map(esc).join('\n');
+    return `<div class="batch-panel" id="bp-panel-${esc(name)}"><div class="bp-title">🚀 批量提交运行中
+      <span class="spin">⠋</span></div>
+      <div class="bar"><i style="width:${pct}%"></i></div>
+      <div class="hint bp-msg">${esc(bt.msg || bt.stage || t('lg.running'))}（${pct}%）</div>
+      <div class="batch-log">${logTail || '等待日志…'}</div>
+      <button class="btn small danger" style="margin-top:6px" onclick="cancelBatch('${esc(name)}','${esc(bt.id)}')">${t('lg.cancel')}</button></div>`;
+  }
+  if (bt && (bt.status === 'done' || bt.status === 'failed')) {
+    const okTxt = bt.status === 'done' ? '✅ 批量任务结束' : '❌ 批量任务失败';
+    const logTail = (bt.log || []).slice(-8).map(esc).join('\n');
+    return `<div class="batch-panel" id="bp-panel-${esc(name)}"><div class="bp-title">${okTxt}</div>
+      <div class="hint">${esc(bt.error || bt.msg || '')}</div>
+      <div class="batch-log">${logTail}</div>
+      ${batchFormHtml(name, true)}</div>`;
+  }
+  return `<div class="batch-panel" id="bp-panel-${esc(name)}"><div class="bp-title">🚀 一键批量提交（自动等待结果并导入）</div>
+    ${batchFormHtml(name, false)}</div>`;
+}
+
+function batchFormHtml(name, showPrev) {
+  return `<div class="bp-row">
+      <span>通知邮箱</span>
+      <input type="text" class="bp-mail" id="bp-mail-${esc(name)}"
+             placeholder="用于接收 Logan-Search 完成通知；多邮箱用英文逗号分隔可轮换防限额">
+      <span>Groups</span>
+      <select id="bp-group-${esc(name)}">${groupsOptions('Fast_No_human')}</select>
+      <label class="chk" style="margin:0"><input type="checkbox" id="bp-headless-${esc(name)}" checked> 后台运行</label>
+      <button class="btn primary small" onclick="startBatch('${esc(name)}')">${t('lg.batchBtn')}</button>
+    </div>
+    <div class="hint" style="margin-top:5px">平台将驱动本机浏览器（Edge/Chrome）逐条提交全部未导入片段，
+    自动等待并下载结果、导入生成报告；过程中请勿关闭弹出的浏览器窗口。断点续跑：再点一次即补漏未落定片段。</div>`;
+}
+
+const subscribed = {};    // jobname -> EventSource（SSE 实时进度流）
+
+function subscribeBatch(name, tid) {
+  if (subscribed[name] || typeof EventSource === 'undefined') return;
+  try {
+    const es = new EventSource(`/api/task/${encodeURIComponent(tid)}/stream`);
+    subscribed[name] = es;
+    es.onmessage = (e) => {
+      const snap = JSON.parse(e.data);
+      batchTasks[name] = snap;
+      updateBatchLive(name, snap);
+      if (snap.status !== 'running') {        // 结束：关流并整卡刷新（导入结果/报告链接）
+        es.close(); delete subscribed[name];
+        loadJobs();
+      }
+    };
+    es.onerror = () => {                   // 断流 → 关闭，回退 3s 轻轮询兜底
+      es.close(); delete subscribed[name];
+    };
+  } catch (e) {}
+}
+
+/* 运行中原位更新：不整页重渲染，不打断正在输入的邮箱框 */
+function updateBatchLive(name, t) {
+  const panel = document.getElementById('bp-panel-' + name);
+  if (!panel || !panel.querySelector('.bar')) { loadJobs(); return; }
+  const pct = Math.max(2, Math.min(98, Math.round((t.pct || 0) * 100)));
+  const bar = panel.querySelector('.bar i');
+  if (bar) bar.style.width = pct + '%';
+  const msg = panel.querySelector('.bp-msg');
+  if (msg) msg.textContent = `${t.msg || t.stage || '运行中…'}（${pct}%）`;
+  const logEl = panel.querySelector('.batch-log');
+  if (logEl) logEl.textContent = (t.log || []).slice(-6).join('\n');
+}
+
+async function refreshBatchTasks() {
+  try {
+    const list = await (await fetch('/api/tasks')).json();
+    const next = {};
+    for (const task of list) {
+      const m = String(task.name || '').match(/^LOGAN (?:批量|batch) (.+)$/);
+      if (m) next[m[1]] = task;
+    }
+    const changed = JSON.stringify(next) !== JSON.stringify(batchTasks);
+    batchTasks = next;
+    for (const [name, task] of Object.entries(next)) {
+      if (task.status === 'running') subscribeBatch(name, task.id);   // 运行中 → 走 SSE
+    }
+    return changed;
+  } catch (e) { return false; }
+}
+
+async function startBatch(name) {
+  const emails = ($('bp-mail-' + name)?.value || '').trim();
+  if (!emails) { alert('请先填写通知邮箱（Logan-Search 完成后会发下载链接到邮箱）'); return; }
+  const body = {
+    emails,
+    group: $('bp-group-' + name)?.value || 'Fast_No_human',
+    headless: $('bp-headless-' + name)?.checked !== false,
+  };
+  const res = await fetch(`/api/logan/job/${encodeURIComponent(name)}/batch`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)});
+  if (!res.ok) {
+    let m = '批量提交启动失败';
+    try { m = (await res.json()).error || m; } catch (e) {}
+    alert(m); return;
+  }
+  await refreshBatchTasks();
+  loadJobs();
+}
+
+async function cancelBatch(name, tid) {
+  if (!confirm('确定取消该批量提交？已提交到服务器的片段仍可能陆续出结果。')) return;
+  await fetch(`/api/task/${tid}/cancel`, {method: 'POST'});
+}
+
+/* ---------- 任务列表 ---------- */
+async function loadJobs() {
+  const box = $('jobList');
+  try {
+    const jobs = await (await fetch('/api/logan/jobs')).json();
+    if (!jobs.length) { box.innerHTML = `<p class="hint">${t('lg.noJobs')}</p>`; return; }
+    box.innerHTML = jobs.map(j => `
+      <div class="card">
+        <h2>${esc(j.name)} ${statusChip(j)}</h2>
+        <div class="job-meta">
+          ${j.sample ? '来源样品：<b>' + esc(j.sample) + '</b> ｜ ' : ''}创建：${esc(j.created)} ｜
+          <a href="/logan/report/${encodeURIComponent(j.name)}/" target="_blank">溯源报告${j.has_report ? '' : '（导入结果后生成）'}</a> ｜
+          <a href="/api/logan/job/${encodeURIComponent(j.name)}/query">下载查询 FASTA</a>
+        </div>
+        <div>${(j.contigs || []).map(c => `<span class="job-contigs">${esc(c.contig)} · ${(c.length||0).toLocaleString()}bp · ${esc(c.species || '')}</span>`).join('')}</div>
+        ${batchPanelHtml(j.name)}
+        <div class="subh"><span class="mode-tag mode-b">方式二 · 手动</span>逐片段提交 / 导入</div>
+        ${(j.segments || []).map(s => `
+          <div class="seg-row">
+            <span class="seg-name">s${s.index}</span>
+            <span>${esc(s.contig)} ｜ ${s.start.toLocaleString()}–${s.end.toLocaleString()}（${s.length.toLocaleString()}bp）</span>
+            <button class="btn small" onclick="copySeg('${esc(j.name)}',${s.index},this)">${t('lg.copySeg')}</button>
+            <button class="btn small" onclick="toggleSeq('${esc(j.name)}',${s.index},this)">${t('lg.view')}</button>
+            <span class="seg-status ${s.imported ? 'done' : 'wait'}">${s.imported ? '已导入 ' + s.n_hits + ' 行' : '未导入'}</span>
+            <button class="btn small" onclick="this.nextElementSibling.click()">${t('lg.importRes')}</button>
+            <input type="file" accept=".tsv,.csv,.txt,.gz" onchange="importResult('${esc(j.name)}',${s.index},this)">
+            <textarea class="seqbox" id="seq-${esc(j.name)}-${s.index}" readonly></textarea>
+          </div>`).join('')}
+        <div style="margin-top:8px">
+          <a href="https://logan-search.org/dashboard" target="_blank" rel="noopener"><button class="btn small">${t('lg.openLogan')}</button></a>
+          <span class="hint">${t('lg.groupsHint')}</span>
+          <button class="btn small danger" style="float:right" onclick="delJob('${esc(j.name)}')">${t('lg.del')}</button>
+        </div>
+      </div>`).join('');
+  } catch (e) { box.innerHTML = `<p class="hint">${t('lg.jobFail')}</p>`; }
+}
+
+async function copySeg(name, idx, btn) {
+  const r = await (await fetch(`/api/logan/job/${encodeURIComponent(name)}/segment/${idx}`)).json();
+  const txt = '>' + r.header + '\n' + r.seq.replace(/(.{70})/g, '$1\n');
+  try { await navigator.clipboard.writeText(txt); ok(btn, '✓ 已复制'); }
+  catch (e) {
+    const ta = $('seq-' + name + '-' + idx);
+    ta.value = txt; ta.style.display = 'block'; ta.select();
+    document.execCommand('copy'); ok(btn, '✓ 已复制');
+  }
+}
+function ok(btn, msg) { const prev = btn.textContent; btn.textContent = msg;
+  setTimeout(() => btn.textContent = prev, 1500); }
+
+async function toggleSeq(name, idx, btn) {
+  const ta = $('seq-' + name + '-' + idx);
+  if (ta.style.display === 'block') { ta.style.display = 'none'; return; }
+  if (!ta.value) {
+    const r = await (await fetch(`/api/logan/job/${encodeURIComponent(name)}/segment/${idx}`)).json();
+    ta.value = '>' + r.header + '\n' + r.seq.replace(/(.{70})/g, '$1\n');
+  }
+  ta.style.display = 'block';
+}
+
+async function importResult(name, idx, input) {
+  if (!input.files || !input.files[0]) return;
+  const fd = new FormData();
+  fd.append('file', input.files[0]);
+  const btn = input.previousElementSibling;
+  btn.textContent = '⏳ 解析中…'; btn.disabled = true;
+  const res = await fetch(`/api/logan/job/${encodeURIComponent(name)}/import/${idx}`,
+                          {method: 'POST', body: fd});
+  if (!res.ok) {
+    let m = '导入失败';
+    try { m = (await res.json()).error || m; } catch (e) {}
+    alert(m);
+  }
+  loadJobs();
+}
+
+async function delJob(name) {
+  if (!confirm('确定删除查询「' + name + '」及其导入的结果？')) return;
+  await fetch(`/api/logan/job/${encodeURIComponent(name)}/delete`, {method: 'POST'});
+  loadJobs();
+}
+
+/* ---------- 轮询（仅兜底：发现新任务 / SSE 断流时的降级通道） ---------- */
+let pollTimer = null;
+async function pollLoop() {
+  const changed = await refreshBatchTasks();
+  if (changed) loadJobs();
+  else {
+    for (const [name, t] of Object.entries(batchTasks)) {
+      if (t.status === 'running' && !subscribed[name]) updateBatchLive(name, t);
+    }
+  }
+  pollTimer = setTimeout(pollLoop, 3000);
+}
+
+/* ---------- 使用流程折叠（状态记忆在 localStorage） ---------- */
+function toggleFlow() {
+  const card = $('flowCard');
+  const collapsed = card.classList.toggle('collapsed');
+  $('flowHead').setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  try { localStorage.setItem('loganFlowCollapsed', collapsed ? '1' : '0'); } catch (e) {}
+}
+try { if (localStorage.getItem('loganFlowCollapsed') === '1') $('flowCard').classList.add('collapsed'); } catch (e) {}
+
+loadBatchReady().then(() => { loadSamples(); loadJobs(); refreshBatchTasks().then(loadJobs); });
+pollLoop();
+</script>
+</body>
+</html>

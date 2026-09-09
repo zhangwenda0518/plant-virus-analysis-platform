@@ -1,0 +1,44 @@
+{# 共享顶部导航：唯一来源，各页 {% include '_nav.html' %} 即可。
+   一级导航 = 业务阶段（msg79 页面布局规范）。
+   数据资源/样本处理/病毒识别/病毒注释/比较基因组/溯源与提交 → /tools?g=<组id>，
+   由 tools 页 JS 高亮；其余按 request.path 服务端高亮。 #}
+<nav class="topnav">
+  <span class="brand"><span class="leaf">🌿</span> 植物病毒分析平台</span>
+  <span class="navlinks">
+    {%- set _nav_items = [
+      ('/', 'nav.home', '总览', ''),
+      ('/pipeline', 'nav.pipeline', '自动化分析流程', ''),
+      ('/tools?g=resource', 'nav.g.resource', '数据资源', 'resource'),
+      ('/tools?g=sample', 'nav.g.sample', '样本处理', 'sample'),
+      ('/tools?g=virus', 'nav.g.virus', '病毒识别和分类分析', 'virus'),
+      ('/tools?g=kvsuite', 'nav.g.kvsuite', '病毒定量与共识', 'kvsuite'),
+      ('/tools?g=annotate', 'nav.g.annotate', '病毒注释分析', 'annotate'),
+      ('/tools?g=compare', 'nav.g.compare', '比较基因组分析', 'compare'),
+      ('/tools?g=trace', 'nav.g.trace', '溯源与提交', 'trace'),
+      ('/tasks', 'nav.tasks', '任务中心', ''),
+      ('/results', 'nav.results', '结果中心', 'result'),
+      ('/settings', 'nav.settings', '设置', ''),
+      ('/help', 'nav.help', '手册', ''),
+    ] -%}
+    {%- for _href, _key, _label, _grp in _nav_items %}
+    {%- if _grp and nav_groups %}
+    {%- set _grp_def = (nav_groups | selectattr('id', 'equalto', _grp) | list | first) or {'items': []} %}
+    <span class="nav-drop">
+      <a href="{{ _href }}" data-i18n="{{ _key }}" data-group="{{ _grp }}"{% if request.path == _href %} class="active"{% endif %}>{{ _label }}</a>
+      <span class="nav-menu">
+        {%- for _it in _grp_def['items'] %}
+        <a href="{{ _it.href or ('/tools?g=' ~ _grp ~ '#' ~ _it.id) }}">
+          <b>{{ _it.title }}</b>
+          {%- if _it.desc %}<small>{{ _it.desc }}</small>{% endif %}
+        </a>
+        {%- endfor %}
+      </span>
+    </span>
+    {%- else %}
+    <a href="{{ _href }}" data-i18n="{{ _key }}"{% if request.path == _href %} class="active"{% endif %}>{{ _label }}{% if _href == '/tasks' %}<span id="navTasksBadge" class="navbadge" style="display:none" title="运行中任务数"></span>{% endif %}</a>
+    {%- endif %}
+    {%- endfor %}
+
+    <a href="#" class="iconbtn" title="打开平台目录" onclick="event.preventDefault();fetch('/api/open_platform_dir')">📂</a>
+  </span>
+</nav>

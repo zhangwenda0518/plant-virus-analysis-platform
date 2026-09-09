@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="vp-lang" content="{{ lang }}">
+<title>植物病毒分析平台</title>
+<script>try{if(localStorage.getItem("vp_theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
+<link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
+</head>
+<body>
+{% include "_nav.html" %}
+
+<div class="page">
+  <div class="hero">
+    <h1 data-i18n="hm.heroTitle">植物病毒分析平台</h1>
+    <p data-i18n="hm.heroSub">本地化病毒诊断与深度分析：宿主去除 → 病毒鉴定 → 组装 →
+       编码预测 / 进化树 / SDT / 引物 → 可视化报告，全程鼠标点击。</p>
+  </div>
+
+  <!-- 数据库模块 -->
+  <h2 class="sec" data-i18n="hm.dbSection">🗄 数据库模块</h2>
+  <div class="module-grid" id="dbCards"><p class="hint" data-i18n="c.loading">加载中…</p></div>
+
+  <!-- 常用工具 -->
+  <div id="favSection" style="display:none">
+    <h2 class="sec">⭐ <span data-i18n="fav.strip">常用工具</span></h2>
+    <div id="favStrip" class="fav-strip"></div>
+  </div>
+
+  <!-- 快捷入口：与顶部一级导航一一对应 -->
+  <h2 class="sec" data-i18n="hm.quickSection">🚀 开始分析</h2>
+  <div class="module-grid">
+    <a class="module-card entry" href="/pipeline">
+      <div class="mc-icon">🧪</div>
+      <div class="mc-name" data-i18n="nav.pipeline">自动化分析流程</div>
+      <div class="mc-desc" data-i18n="hm.entry.flow.d">新建样品，13 步级联：质控 → 宿主去除 → 病毒筛查 → 组装 → ORF/注释 → 进化树/引物 → 基因组图 → 报告</div>
+    </a>
+    <a class="module-card entry" href="/tools?g=resource">
+      <div class="mc-icon">🌐</div>
+      <div class="mc-name" data-i18n="nav.g.resource">数据资源</div>
+      <div class="mc-desc" data-i18n="hm.entry.resource.d">公共数据检索 · Open-Virome · 数据下载 · 数据库构建</div>
+    </a>
+    <a class="module-card entry" href="/tools?g=sample">
+      <div class="mc-icon">🧹</div>
+      <div class="mc-name" data-i18n="nav.g.sample">样本处理</div>
+      <div class="mc-desc" data-i18n="hm.entry.sample.d">格式转换（sra/fastq→fasta）· 序列质控 · 宿主去除 · 序列查看器</div>
+    </a>
+    <a class="module-card entry" href="/tools?g=virus">
+      <div class="mc-icon">🦠</div>
+      <div class="mc-name" data-i18n="nav.g.virus">病毒识别和分类分析</div>
+      <div class="mc-desc" data-i18n="hm.entry.virus.d">病毒识别分类与提取 · 提取序列组装 · 组装结果再鉴定</div>
+    </a>
+    <a class="module-card entry" href="/tools?g=kvsuite">
+      <div class="mc-icon">📈</div>
+      <div class="mc-name" data-i18n="nav.g.kvsuite">病毒定量与共识</div>
+      <div class="mc-desc" data-i18n="hm.entry.kvsuite.d">已知病毒识别与定量 · 共识序列分析 · 深度图 · 变异注释</div>
+    </a>
+    <a class="module-card entry" href="/tools?g=annotate">
+      <div class="mc-icon">🔬</div>
+      <div class="mc-name" data-i18n="nav.g.annotate">病毒注释分析</div>
+      <div class="mc-desc" data-i18n="hm.entry.annotate.d">ORF 预测 · 功能注释 · 保守域/同源复核 · 基因组图谱 · 引物设计</div>
+    </a>
+    <a class="module-card entry" href="/tools?g=compare">
+      <div class="mc-icon">🧬</div>
+      <div class="mc-name" data-i18n="nav.g.compare">比较基因组分析</div>
+      <div class="mc-desc" data-i18n="hm.entry.compare.d">参考序列下载 · GenBank 集合 · MSA/进化树/SDT · 同属共线性</div>
+    </a>
+    <a class="module-card entry" href="/results">
+      <div class="mc-icon">📊</div>
+      <div class="mc-name" data-i18n="nav.results">结果中心</div>
+      <div class="mc-desc" data-i18n="hm.entry.results.d">样品报告 · 专项结果 · MSA/树/SDT 交互查看器</div>
+    </a>
+    <a class="module-card entry" href="/tools?g=trace">
+      <div class="mc-icon">🧭</div>
+      <div class="mc-name" data-i18n="nav.g.trace">溯源与提交</div>
+      <div class="mc-desc" data-i18n="hm.entry.trace.d">LOGAN 溯源（2340 万公共样本交叉验证）· NCBI 提交准备</div>
+    </a>
+  </div>
+
+  <!-- 最近样品 -->
+  <h2 class="sec" data-i18n="hm.recentSection">🧪 最近样品</h2>
+  <div id="homeSamples" class="module-grid"><p class="hint" data-i18n="c.loading">加载中…</p></div>
+</div>
+
+<script src="/static/i18n.js?v={{ asset_v }}"></script>
+<script src="/static/app.js?v={{ asset_v }}"></script>
+</body>
+</html>

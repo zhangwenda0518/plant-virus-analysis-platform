@@ -1,0 +1,727 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+kv_variant_plot.py — 变异分析可视化段
+=====================================
+把变异段（kv_variant.py）的产物渲染成出版级图件，供平台页面内联展示。
+
+输入（全部来自变异段与绘图段产物，不重新计算）:
+  <out>/vcf/{accession}.vcf              每参考的过滤后变异（含 QUAL/DP/AD）
+  <out>/annotated/{accession}.ann.tsv    SnpEff 功能注释（含 Gene_Name/Annotation/Impact）
+  <out>/gbk_files/{accession}.gb         GenBank 注释（基因轨道坐标）
+  <out>/variant_summary.json             变异段汇总（n_success/n_skipped/results/skipped）
+
+输出:
+  <out>/variant_plots/{accession}_variant_map.{pdf,png}      位点分布棒棒糖图
+  <out>/variant_plots/{accession}_variant_effect.{pdf,png}   效应谱（Annotation × Impact）
+  <out>/variant_plots/{accession}_variant_af_dp.{pdf,png)   等位频率 vs 深度散点
+  <out>/variant_plots/{accession}_variant_overview.{pdf,png} 三联组合主图
+  <out>/variant_plots/variant_plot_manifest.json             产物清单
+
+设计约束（大王 SCI 图偏好）:
+  - 白底；Okabe-Ito 色盲友好配色；300 dpi；pdf.fonttype 42
+  - 全英文标签；拉丁学名斜体（本模块只用 accession 与基因名，不含拉丁名）
+  - 图例不遮挡数据
+"""
+
+import json
+import math
+import os
+from pathlib import Path
+
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.patches import Rectangle
+
+plt.rcParams.update({
+    'pdf.fonttype': 42,
+    'ps.fonttype': 42,
+    'font.sans-serif': ['Arial', 'Helvetica', 'DejaVu Sans'],
+    'font.family': 'sans-serif',
+    'axes.unicode_minus': False,
+    'figure.facecolor': 'white',
+    'savefig.facecolor': 'white',
+    'savefig.dpi': 300,
+    'axes.linewidth': 0.8,
+    'axes.edgecolor': '#333333',
+    'xtick.major.width': 0.8,
+    'ytick.major.width': 0.8,
+})
+
+# Okabe-Ito 色盲友好配色（Wong 2011, Nature Methods）
+OKABE_ITO = {
+    'orange':  '#E69F00',
+    'sky':     '#56B4E9',
+    'green':   '#009E73',
+    'yellow':  '#F0E442',
+    'blue':    '#0072B2',
+    'vermillion': '#D55E00',
+    'purple':  '#CC79A7',
+    'black':   '#000000',
+    'grey':    '#999999',
+}
+
+# SnpEff Impact 四级 → Okabe-Ito
+IMPACT_COLOR = {
+    'HIGH':     OKABE_ITO['vermillion'],
+    'MODERATE': OKABE_ITO['orange'],
+    'LOW':      OKABE_ITO['sky'],
+    'MODIFIER': OKABE_ITO['grey'],
+}
+IMPACT_ORDER = ['HIGH', 'MODERATE', 'LOW', 'MODIFIER']
+
+# 效应类型显示名（SnpEff 的 snake_case → 阅读友好）
+EFFECT_LABEL = {
+    'missense_variant': 'Missense',
+    'synonymous_variant': 'Synonymous',
+    'stop_gained': 'Stop gained',
+    'stop_lost': 'Stop lost',
+    'start_lost': 'Start lost',
+    'start_retained_variant': 'Start retained',
+    'stop_retained_variant': 'Stop retained',
+    'frameshift_variant': 'Frameshift',
+    'inframe_insertion': 'Inframe ins',
+    'inframe_deletion': 'Inframe del',
+    'disruptive_inframe_insertion': 'Disruptive ins',
+    'disruptive_inframe_deletion': 'Disruptive del',
+    'conservative_inframe_insertion': 'Conservative ins',
+    'conservative_inframe_deletion': 'Conservative del',
+    'initiator_codon_variant': 'Initiator codon',
+    'terminator_codon_variant': 'Terminator codon',
+    'coding_sequence_variant': 'Coding sequence',
+}
+
+
+def safe_name(s):
+    """文件名净化（与 kv_plot.safe_name 同口径）"""
+    return "".join(c if c.isalnum() or c in "._-" else "_" for c in str(s))
+
+
+def _decode_field(info: str, key: str):
+    """从 VCF INFO 串取指定键的值（第一个匹配）。"""
+    for item in info.split(';'):
+        if item.startswith(key + '='):
+            return item[len(key) + 1:]
+        if item == key:
+            return True
+    return None
+
+
+def parse_vcf_variants(vcf_path: Path) -> list[dict]:
+    """读 VCF，取每条的 QUAL / DP / AD / AF / DP4。
+
+    AF 口径与变异段过滤一致：AD[1] / INFO/DP（无 AD 时退回 AC/AN）。
+    """
+    rows = []
+    with open(vcf_path, encoding='utf-8', errors='replace') as fh:
+        for line in fh:
+            if line.startswith('#') or not line.strip():
+                continue
+            f = line.rstrip('\n').split('\t')
+            if len(f) < 8:
+                continue
+            chrom, pos, _id, ref, alt, qual, filt, info = f[:8]
+            try:
+                pos_i = int(pos)
+            except ValueError:
+                continue
+            dp = _decode_field(info, 'DP')
+            ad = _decode_field(info, 'AD')
+            ac = _decode_field(info, 'AC')
+            an = _decode_field(info, 'AN')
+            dp4 = _decode_field(info, 'DP4')
+            try:
+                dp_i = int(dp) if dp is not None else None
+            except (TypeError, ValueError):
+                dp_i = None
+            ref_ad = alt_ad = None
+            if ad:
+                parts = str(ad).split(',')
+                if len(parts) >= 2:
+                    try:
+                        ref_ad, alt_ad = int(parts[0]), int(parts[1])
+                    except ValueError:
+                        ref_ad = alt_ad = None
+            # AF：优先 AD[1]/DP（与过滤口径一致）
+            af = None
+            if alt_ad is not None and dp_i:
+                af = alt_ad / dp_i
+            elif ac is not None and an:
+                try:
+                    af = float(ac) / float(an)
+                except (TypeError, ValueError, ZeroDivisionError):
+                    af = None
+            try:
+                qual_f = float(qual)
+            except (TypeError, ValueError):
+                qual_f = None
+            # DP4: ref-fwd, ref-rev, alt-fwd, alt-rev（用于链偏倚）
+            alt_fwd = alt_rev = None
+            if dp4:
+                p4 = str(dp4).split(',')
+                if len(p4) == 4:
+                    try:
+                        alt_fwd, alt_rev = int(p4[2]), int(p4[3])
+                    except ValueError:
+                        alt_fwd = alt_rev = None
+            rows.append({
+                'CHROM': chrom, 'POS': pos_i, 'REF': ref, 'ALT': alt,
+                'QUAL': qual_f, 'DP': dp_i, 'AF': af, 'FILTER': filt,
+                'ALT_AD': alt_ad, 'REF_AD': ref_ad,
+                'ALT_FWD': alt_fwd, 'ALT_REV': alt_rev,
+                'is_indel': len(ref) != len(alt),
+            })
+    return rows
+
+
+def load_ann(ann_path: Path) -> list[dict]:
+    """读 SnpEff 注释 TSV（列名与 kv_variant.ANN_COLS 一致）。"""
+    rows = []
+    with open(ann_path, encoding='utf-8', errors='replace') as fh:
+        header = fh.readline().rstrip('\n').split('\t')
+        for line in fh:
+            if not line.strip():
+                continue
+            vals = line.rstrip('\n').split('\t')
+            vals += [''] * (len(header) - len(vals))
+            rows.append(dict(zip(header, vals)))
+    return rows
+
+
+def parse_gb_genes(gb_path: Path, logger=None) -> list[dict]:
+    """解析 GenBank 的 CDS/gene 坐标。
+
+    直接复用 kv_plot.parse_gb_features，避免两份实现漂移；
+    额外补一个 length 字段（记录全长，变异图坐标轴用）。
+    """
+    try:
+        from Bio import SeqIO
+    except ImportError:
+        if logger:
+            logger.warning('  Biopython 缺失，无法解析 GenBank 注释')
+        return []
+    from kv_plot import parse_gb_features
+    feats = parse_gb_features(str(gb_path), logger)
+    if not feats:
+        return []
+    try:
+        rec_len = len(next(SeqIO.parse(str(gb_path), 'genbank')).seq)
+    except Exception as e:  # noqa: BLE001
+        if logger:
+            logger.warning(f'  {Path(gb_path).name} 记录长度读取失败: {e}')
+        rec_len = 0
+    for f in feats:
+        f.setdefault('length', rec_len)
+    return feats
+    # 去重：同坐标优先 CDS
+    seen = {}
+    for f in out:
+        key = (f['start'], f['end'])
+        if key not in seen or f['type'] == 'CDS':
+            seen[key] = f
+    return sorted(seen.values(), key=lambda x: x['start'])
+
+
+def _style_axis(ax, hide_top_right=True):
+    if hide_top_right:
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+    ax.tick_params(labelsize=8, length=3)
+
+
+def _save(fig, out_dir: Path, stem: str, formats=('png', 'pdf')) -> list[str]:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    made = []
+    try:
+        for ext in formats:
+            p = out_dir / f'{stem}.{ext}'
+            fig.savefig(p, format=ext, dpi=300, bbox_inches='tight',
+                        facecolor='white')
+            made.append(str(p))
+    finally:
+        # 多个参考逐一出图时，savefig 抛异常不 close 会累积泄漏 figure
+        plt.close(fig)
+    return made
+
+
+# ── 图一：位点分布棒棒糖图 ─────────────────────────────────────────
+def plot_variant_map(variants, ann_rows, genes, accession, genome_len,
+                     out_dir, formats=('png', 'pdf')):
+    """沿参考坐标画变异位点；按 Impact 着色，下方画基因轨道。"""
+    if not variants:
+        return []
+    # 注释按 POS 建索引（一个位点可能多条 ANN，取最严重的一条）
+    ann_by_pos = {}
+    for r in ann_rows:
+        try:
+            pos = int(r['POS'])
+        except (TypeError, ValueError):
+            continue
+        prev = ann_by_pos.get(pos)
+        if prev is None:
+            ann_by_pos[pos] = r
+        else:
+            if (IMPACT_ORDER.index(r['Impact'])
+                    if r['Impact'] in IMPACT_ORDER else 9) < (
+                    IMPACT_ORDER.index(prev['Impact'])
+                    if prev['Impact'] in IMPACT_ORDER else 9):
+                ann_by_pos[pos] = r
+
+    has_genes = bool(genes)
+    if has_genes:
+        fig, (ax, axg) = plt.subplots(
+            2, 1, figsize=(9.5, 3.6), sharex=True,
+            gridspec_kw={'height_ratios': [3, 1], 'hspace': 0.12})
+    else:
+        fig, ax = plt.subplots(figsize=(9.5, 2.8))
+        axg = None
+
+    # 变异点：x=位置，y=1 固定高度，颜色=Impact
+    for v in variants:
+        ann = ann_by_pos.get(v['POS'], {})
+        impact = ann.get('Impact') or 'MODIFIER'
+        color = IMPACT_COLOR.get(impact, OKABE_ITO['grey'])
+        y = 1.0
+        if v['QUAL'] is not None and v['QUAL'] > 0:
+            # 用 log10(QUAL) 做一个小的纵向抖动，避免完全重叠
+            y = 1.0 + min(0.9, math.log10(max(v['QUAL'], 1.0)) / 3.0)
+        ax.plot([v['POS'], v['POS']], [0.35, y], color=color, lw=0.7,
+                alpha=0.75, zorder=2)
+        ax.plot([v['POS']], [y], marker='o', ms=4.0, color=color,
+                markeredgecolor='white', markeredgewidth=0.4, zorder=3,
+                linestyle='none')
+        if v['is_indel']:
+            ax.plot([v['POS']], [y + 0.13], marker='v', ms=3.4,
+                    color=OKABE_ITO['black'], linestyle='none', zorder=4)
+
+    ax.set_ylim(0.2, 2.2)
+    ax.set_yticks([])
+    ax.spines['left'].set_visible(False)
+    _style_axis(ax)
+    title = f'{accession} — variant landscape'
+    ax.set_title(title, fontsize=10.5, fontweight='bold', pad=8)
+
+    # 顶部标注统计
+    n_high = sum(1 for v in variants
+                 if (ann_by_pos.get(v['POS'], {}).get('Impact') == 'HIGH'))
+    n_mod = sum(1 for v in variants
+                if (ann_by_pos.get(v['POS'], {}).get('Impact') == 'MODERATE'))
+    stat = (f'n = {len(variants)} variants   '
+            f'HIGH {n_high}   MODERATE {n_mod}')
+    ax.text(0.0, 1.005, stat, transform=ax.transAxes, fontsize=8,
+            color='#444444', va='bottom')
+
+    # 图例（右上角外置，不遮挡）
+    handles = [Line2D([], [], marker='o', color=c, linestyle='none',
+                      ms=5, markeredgecolor='white', markeredgewidth=0.4,
+                      label=k) for k, c in IMPACT_COLOR.items()]
+    handles.append(Line2D([], [], marker='v', color=OKABE_ITO['black'],
+                          linestyle='none', ms=4, label='Indel'))
+    ax.legend(handles=handles, fontsize=7.5, frameon=False,
+              loc='upper right', ncol=len(handles), handletextpad=0.4,
+              columnspacing=1.0, bbox_to_anchor=(1.0, 1.16))
+
+    # 基因轨道
+    if axg is not None:
+        _draw_gene_track(axg, genes, genome_len or max(v['POS'] for v in variants))
+        axg.set_xlabel(f'Position along {accession} (nt)', fontsize=9)
+    else:
+        ax.set_xlabel(f'Position along {accession} (nt)', fontsize=9)
+    return _save(fig, out_dir, f'{safe_name(accession)}_variant_map', formats)
+
+
+def _draw_gene_track(ax, genes, genome_len):
+    """基因轨道：横向矩形 + 链方向箭头，Okabe-Ito 循环配色。"""
+    ax.set_ylim(-0.5, len(genes) - 0.5 if len(genes) > 1 else 0.5)
+    ax.set_yticks([])
+    ax.spines['left'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    _style_axis(ax, hide_top_right=False)
+
+    palette = [OKABE_ITO[k] for k in
+               ('blue', 'orange', 'green', 'purple', 'vermillion', 'sky')]
+    for i, g in enumerate(genes):
+        c = palette[i % len(palette)]
+        start, end = g['start'], g['end']
+        ax.add_patch(Rectangle((start, i - 0.22), max(end - start, 1), 0.44,
+                               facecolor=c, edgecolor='none', alpha=0.85))
+        label = g['name'][:18]
+        ax.text(start, i + 0.30, label, fontsize=6.5, color='#333333',
+                va='bottom', ha='left', clip_on=True)
+    ax.set_xlim(0, genome_len)
+
+
+# ── 图二：效应谱 ───────────────────────────────────────────────────
+def plot_effect_spectrum(ann_rows, accession, out_dir, formats=('png', 'pdf')):
+    """Annotation 类型 × Impact 堆叠条形图。"""
+    if not ann_rows:
+        return []
+    counts = {}
+    for r in ann_rows:
+        eff = r.get('Annotation') or 'unknown'
+        imp = r.get('Impact') if r.get('Impact') in IMPACT_ORDER else 'MODIFIER'
+        counts.setdefault(eff, {k: 0 for k in IMPACT_ORDER})[imp] += 1
+    if not counts:
+        return []
+    # 排序：按总数降序，同级按最严重程度
+    effects = sorted(counts.keys(),
+                     key=lambda e: (-sum(counts[e].values()),
+                                    min(IMPACT_ORDER.index(k)
+                                        for k in IMPACT_ORDER
+                                        if counts[e][k] > 0) if any(
+                                        counts[e][k] > 0 for k in IMPACT_ORDER) else 9))
+    labels = [EFFECT_LABEL.get(e, e.replace('_', ' ')) for e in effects]
+
+    fig, ax = plt.subplots(figsize=(7.6, max(2.6, 0.42 * len(effects) + 1.5)))
+    y = list(range(len(effects)))
+    left = [0] * len(effects)
+    for imp in IMPACT_ORDER:
+        vals = [counts[e][imp] for e in effects]
+        if not any(vals):
+            continue
+        ax.barh(y, vals, left=left, color=IMPACT_COLOR[imp], height=0.62,
+                label=imp, edgecolor='white', linewidth=0.5)
+        for i, (v, l0) in enumerate(zip(vals, left)):
+            if v > 0:
+                ax.text(l0 + v / 2, y[i], str(v), ha='center', va='center',
+                        fontsize=7, color='white', fontweight='bold')
+        left = [a + b for a, b in zip(left, vals)]
+
+    ax.set_yticks(y)
+    ax.set_yticklabels(labels, fontsize=8.5)
+    ax.invert_yaxis()
+    ax.set_xlabel('Number of variants', fontsize=9)
+    ax.set_title(f'{accession} — functional effect spectrum',
+                 fontsize=10.5, fontweight='bold', pad=8)
+    _style_axis(ax)
+    ax.legend(fontsize=7.5, frameon=False, loc='lower right', title=None)
+    ax.grid(axis='x', color='#DDDDDD', lw=0.5, alpha=0.7)
+    ax.set_axisbelow(True)
+    return _save(fig, out_dir, f'{safe_name(accession)}_variant_effect', formats)
+
+
+# ── 图三：等位频率 vs 深度 ─────────────────────────────────────────
+def plot_af_dp(variants, ann_rows, accession, out_dir, formats=('png', 'pdf')):
+    """AF vs DP 散点；颜色=Impact，大小=QUAL，虚线标 min-freq 阈值。"""
+    pts = [v for v in variants if v['AF'] is not None and v['DP']]
+    if not pts:
+        return []
+    ann_by_pos = {}
+    for r in ann_rows:
+        try:
+            pos = int(r['POS'])
+        except (TypeError, ValueError):
+            continue
+        prev = ann_by_pos.get(pos)
+        if prev is None or (IMPACT_ORDER.index(r['Impact'])
+                            if r['Impact'] in IMPACT_ORDER else 9) < (
+                            IMPACT_ORDER.index(prev['Impact'])
+                            if prev['Impact'] in IMPACT_ORDER else 9):
+            ann_by_pos[pos] = r
+
+    fig, ax = plt.subplots(figsize=(6.2, 4.4))
+    for v in pts:
+        imp = ann_by_pos.get(v['POS'], {}).get('Impact') or 'MODIFIER'
+        c = IMPACT_COLOR.get(imp, OKABE_ITO['grey'])
+        size = 18 + 42 * min(1.0, math.log10(max(v['QUAL'] or 1, 1.0)) / 3.0)
+        ax.scatter(v['DP'], v['AF'], s=size, color=c, alpha=0.75,
+                   edgecolors='white', linewidths=0.5, zorder=3)
+        if v['is_indel']:
+            ax.scatter(v['DP'], v['AF'], s=size + 26, facecolors='none',
+                       edgecolors=OKABE_ITO['black'], linewidths=0.6,
+                       zorder=4)
+
+    ax.axhline(0.05, color='#999999', ls='--', lw=0.8, zorder=1)
+    ax.text(ax.get_xlim()[1], 0.052, ' min-freq 0.05', fontsize=7,
+            color='#666666', va='bottom', ha='right')
+    ax.set_xlabel('Read depth (DP)', fontsize=9)
+    ax.set_ylabel('Allele frequency (AD[1]/DP)', fontsize=9)
+    ax.set_title(f'{accession} — allele frequency vs depth',
+                 fontsize=10.5, fontweight='bold', pad=8)
+    ax.set_ylim(-0.03, 1.03)
+    _style_axis(ax)
+    ax.grid(color='#EEEEEE', lw=0.5, zorder=0)
+    ax.set_axisbelow(True)
+
+    handles = [Line2D([], [], marker='o', color=c, linestyle='none', ms=5.5,
+                      markeredgecolor='white', label=k)
+               for k, c in IMPACT_COLOR.items()]
+    handles.append(Line2D([], [], marker='o', markerfacecolor='none',
+                          markeredgecolor=OKABE_ITO['black'], linestyle='none',
+                          ms=7, label='Indel'))
+    ax.legend(handles=handles, fontsize=7.5, frameon=False,
+              loc='lower right', ncol=2, handletextpad=0.4, columnspacing=1.0)
+    return _save(fig, out_dir, f'{safe_name(accession)}_variant_af_dp', formats)
+
+
+# ── 组合主图（三面板）─────────────────────────────────────────────
+def plot_overview(variants, ann_rows, genes, accession, genome_len,
+                  out_dir, formats=('png', 'pdf')):
+    """三面板组合主图：上=位点分布，左下=效应谱，右下=AF/DP。"""
+    if not variants and not ann_rows:
+        return []
+    fig = plt.figure(figsize=(11.5, 7.2))
+    gs = fig.add_gridspec(2, 2, height_ratios=[1.0, 1.25],
+                          width_ratios=[1.25, 1.0],
+                          hspace=0.42, wspace=0.28)
+
+    # 上：位点分布（跨两列）
+    axt = fig.add_subplot(gs[0, :])
+    _panel_variant_map(axt, variants, ann_rows, genes, accession, genome_len)
+
+    # 左下：效应谱
+    axl = fig.add_subplot(gs[1, 0])
+    _panel_effect_bars(axl, ann_rows, accession)
+
+    # 右下：AF/DP
+    axr = fig.add_subplot(gs[1, 1])
+    _panel_af_dp(axr, variants, ann_rows, accession)
+
+    fig.suptitle(f'Variant analysis overview — {accession}',
+                 fontsize=12, fontweight='bold', y=0.985)
+    return _save(fig, out_dir, f'{safe_name(accession)}_variant_overview', formats)
+
+
+def _panel_variant_map(ax, variants, ann_rows, genes, accession, genome_len):
+    ann_by_pos = {}
+    for r in ann_rows:
+        try:
+            pos = int(r['POS'])
+        except (TypeError, ValueError):
+            continue
+        prev = ann_by_pos.get(pos)
+        if prev is None or (IMPACT_ORDER.index(r['Impact'])
+                            if r['Impact'] in IMPACT_ORDER else 9) < (
+                            IMPACT_ORDER.index(prev['Impact'])
+                            if prev['Impact'] in IMPACT_ORDER else 9):
+            ann_by_pos[pos] = r
+    for v in variants:
+        imp = ann_by_pos.get(v['POS'], {}).get('Impact') or 'MODIFIER'
+        c = IMPACT_COLOR.get(imp, OKABE_ITO['grey'])
+        y = 1.0 + (min(0.9, math.log10(max(v['QUAL'] or 1, 1.0)) / 3.0)
+                   if v['QUAL'] else 0.0)
+        ax.plot([v['POS'], v['POS']], [0.45, y], color=c, lw=0.6,
+                alpha=0.7, zorder=2)
+        ax.plot([v['POS']], [y], marker='o', ms=3.6, color=c,
+                markeredgecolor='white', markeredgewidth=0.35,
+                linestyle='none', zorder=3)
+        if v['is_indel']:
+            ax.plot([v['POS']], [y + 0.13], marker='v', ms=3.0,
+                    color=OKABE_ITO['black'], linestyle='none', zorder=4)
+    ax.set_ylim(0.3, 2.15)
+    ax.set_yticks([])
+    ax.spines['left'].set_visible(False)
+    _style_axis(ax)
+    ax.set_xlabel(f'Position along {accession} (nt)', fontsize=8.5)
+    ax.set_title('A  Variant landscape', fontsize=9.5, fontweight='bold',
+                 loc='left', pad=6)
+    handles = [Line2D([], [], marker='o', color=c, linestyle='none', ms=4.5,
+                      markeredgecolor='white', label=k)
+               for k, c in IMPACT_COLOR.items()]
+    handles.append(Line2D([], [], marker='v', color=OKABE_ITO['black'],
+                          linestyle='none', ms=3.6, label='Indel'))
+    ax.legend(handles=handles, fontsize=6.8, frameon=False,
+              loc='upper right', ncol=len(handles), handletextpad=0.35,
+              columnspacing=0.8, bbox_to_anchor=(1.0, 1.20))
+
+
+def _panel_effect_bars(ax, ann_rows, accession):
+    counts = {}
+    for r in ann_rows:
+        eff = r.get('Annotation') or 'unknown'
+        imp = r.get('Impact') if r.get('Impact') in IMPACT_ORDER else 'MODIFIER'
+        counts.setdefault(eff, {k: 0 for k in IMPACT_ORDER})[imp] += 1
+    if not counts:
+        ax.axis('off')
+        return
+    effects = sorted(counts.keys(), key=lambda e: -sum(counts[e].values()))
+    labels = [EFFECT_LABEL.get(e, e.replace('_', ' ')) for e in effects]
+    y = list(range(len(effects)))
+    left = [0] * len(effects)
+    for imp in IMPACT_ORDER:
+        vals = [counts[e][imp] for e in effects]
+        if not any(vals):
+            continue
+        ax.barh(y, vals, left=left, color=IMPACT_COLOR[imp], height=0.6,
+                label=imp, edgecolor='white', linewidth=0.4)
+        left = [a + b for a, b in zip(left, vals)]
+    ax.set_yticks(y)
+    ax.set_yticklabels(labels, fontsize=7.5)
+    ax.invert_yaxis()
+    ax.set_xlabel('Number of variants', fontsize=8.5)
+    ax.set_title('B  Effect spectrum', fontsize=9.5, fontweight='bold',
+                 loc='left', pad=6)
+    _style_axis(ax)
+    ax.grid(axis='x', color='#DDDDDD', lw=0.5, alpha=0.7)
+    ax.set_axisbelow(True)
+
+
+def _panel_af_dp(ax, variants, ann_rows, accession):
+    pts = [v for v in variants if v['AF'] is not None and v['DP']]
+    if not pts:
+        ax.axis('off')
+        return
+    ann_by_pos = {}
+    for r in ann_rows:
+        try:
+            pos = int(r['POS'])
+        except (TypeError, ValueError):
+            continue
+        prev = ann_by_pos.get(pos)
+        if prev is None or (IMPACT_ORDER.index(r['Impact'])
+                            if r['Impact'] in IMPACT_ORDER else 9) < (
+                            IMPACT_ORDER.index(prev['Impact'])
+                            if prev['Impact'] in IMPACT_ORDER else 9):
+            ann_by_pos[pos] = r
+    for v in pts:
+        imp = ann_by_pos.get(v['POS'], {}).get('Impact') or 'MODIFIER'
+        c = IMPACT_COLOR.get(imp, OKABE_ITO['grey'])
+        ax.scatter(v['DP'], v['AF'], s=16, color=c, alpha=0.75,
+                   edgecolors='white', linewidths=0.4, zorder=3)
+    ax.axhline(0.05, color='#999999', ls='--', lw=0.7, zorder=1)
+    ax.set_xlabel('Read depth (DP)', fontsize=8.5)
+    ax.set_ylabel('Allele frequency', fontsize=8.5)
+    ax.set_ylim(-0.03, 1.03)
+    ax.set_title('C  Allele frequency vs depth', fontsize=9.5,
+                 fontweight='bold', loc='left', pad=6)
+    _style_axis(ax)
+    ax.grid(color='#EEEEEE', lw=0.5, zorder=0)
+    ax.set_axisbelow(True)
+
+
+# ── 编排入口 ───────────────────────────────────────────────────────
+def run_variant_plots(out_dir, logger=None, formats=('png', 'pdf'),
+                      accession_filter=None) -> dict:
+    """为 out_dir 下所有有变异+注释的参考出图。
+
+    返回 {'n_accessions': n, 'plots': [...相对路径...], 'skipped': [...]}
+    """
+    out_dir = Path(out_dir)
+    vcf_dir = out_dir / 'vcf'
+    ann_dir = out_dir / 'annotated'
+    gbk_dir = out_dir / 'gbk_files'
+    plot_dir = out_dir / 'variant_plots'
+
+    def _log(level, msg):
+        if logger is None:
+            return
+        getattr(logger, level, logger.info)(msg)
+
+    if not vcf_dir.is_dir():
+        _log('warning', f'无 vcf 目录，跳过变异绘图: {vcf_dir}')
+        return {'n_accessions': 0, 'plots': [], 'skipped': []}
+
+    # 以注释目录为准（有注释才有基因/效应信息）
+    accessions = []
+    if ann_dir.is_dir():
+        for fn in sorted(os.listdir(ann_dir)):
+            if fn.endswith('.ann.tsv'):
+                accessions.append(fn[:-len('.ann.tsv')])
+    if accession_filter:
+        keep = set(accession_filter)
+        accessions = [a for a in accessions if a in keep]
+    if not accessions:
+        _log('warning', '无 .ann.tsv 注释文件，跳过变异绘图')
+        return {'n_accessions': 0, 'plots': [], 'skipped': []}
+
+    all_plots = []
+    skipped = []
+    for acc in accessions:
+        vcf_path = vcf_dir / f'{acc}.vcf'
+        ann_path = ann_dir / f'{acc}.ann.tsv'
+        if not vcf_path.is_file():
+            _log('warning', f'  {acc}: 缺 VCF，跳过')
+            skipped.append({'accession': acc, 'reason': '缺 VCF'})
+            continue
+        try:
+            variants = parse_vcf_variants(vcf_path)
+            ann_rows = load_ann(ann_path)
+        except Exception as e:
+            _log('warning', f'  {acc}: 读取失败 {e}')
+            skipped.append({'accession': acc, 'reason': f'读取失败: {e}'})
+            continue
+        if not variants and not ann_rows:
+            _log('info', f'  {acc}: 无变异记录，跳过')
+            skipped.append({'accession': acc, 'reason': '无变异记录'})
+            continue
+
+        gbk = gbk_dir / f'{acc}.gb'
+        if not gbk.is_file():
+            # 注释文件名可能省略版本号（OR489165 vs OR489165.1），回退搜索
+            cands = sorted(gbk_dir.glob(f'{safe_name(acc)}*.gb')) \
+                if gbk_dir.is_dir() else []
+            if not cands:
+                cands = sorted(gbk_dir.glob(f'{str(acc).split(".")[0]}*.gb')) \
+                    if gbk_dir.is_dir() else []
+            if cands:
+                gbk = cands[0]
+                _log('debug', f'  {acc}: GenBank 匹配到 {gbk.name}')
+        class _LogAdapter:
+            """把 run_variant_plots 的 _log 包成 logger 对象，给复用函数用"""
+            def __getattr__(self, lv):
+                return lambda msg, *a: _log(lv if lv in (
+                    'info', 'warning', 'error', 'debug') else 'info',
+                    msg % a if a else msg)
+
+        genes = parse_gb_genes(gbk, _LogAdapter()) if gbk.is_file() else []
+        if not genes:
+            _log('debug', f'  {acc}: 无基因轨道（{gbk.name if gbk.is_file() else "缺 GenBank"}）')
+        genome_len = 0
+        if genes:
+            genome_len = max(g.get('length', 0) for g in genes)
+        if not genome_len and variants:
+            genome_len = max(v['POS'] for v in variants)
+
+        made = []
+        try:
+            made += plot_variant_map(variants, ann_rows, genes, acc,
+                                     genome_len, plot_dir, formats)
+            made += plot_effect_spectrum(ann_rows, acc, plot_dir, formats)
+            made += plot_vaf_dp_safe(variants, ann_rows, acc, plot_dir, formats)
+            made += plot_overview(variants, ann_rows, genes, acc,
+                                  genome_len, plot_dir, formats)
+        except Exception as e:
+            _log('error', f'  {acc}: 绘图失败 {e}')
+            skipped.append({'accession': acc, 'reason': f'绘图失败: {e}'})
+            continue
+
+        for p in made:
+            all_plots.append(os.path.relpath(p, out_dir).replace(os.sep, '/'))
+        _log('info', f'  {acc}: {len(made)} 张图（变异 {len(variants)} 条，'
+                     f'注释 {len(ann_rows)} 条）')
+
+    manifest = {
+        'n_accessions': len(accessions),
+        'n_plots': len(all_plots),
+        'plots': sorted(all_plots),
+        'skipped': skipped,
+    }
+    plot_dir.mkdir(parents=True, exist_ok=True)
+    (plot_dir / 'variant_plot_manifest.json').write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
+    _log('info', f'变异绘图完成：{len(accessions)} 条参考，{len(all_plots)} 张图')
+    return manifest
+
+
+def plot_vaf_dp_safe(variants, ann_rows, accession, out_dir, formats):
+    """plot_af_dp 的容错包装（内部函数名历史原因保留）。"""
+    return plot_af_dp(variants, ann_rows, accession, out_dir, formats)
+
+
+if __name__ == '__main__':
+    import argparse
+    import logging
+    ap = argparse.ArgumentParser(description='变异分析可视化')
+    ap.add_argument('--out', required=True, help='variant 段产物目录')
+    ap.add_argument('--acc', nargs='*', default=None, help='只画指定 accession')
+    ap.add_argument('--verbose', action='store_true')
+    a = ap.parse_args()
+    logging.basicConfig(
+        level=logging.DEBUG if a.verbose else logging.INFO,
+        format='%(asctime)s %(levelname)s %(message)s', datefmt='%H:%M:%S')
+    res = run_variant_plots(a.out, logging.getLogger(),
+                            accession_filter=a.acc)
+    print(json.dumps(res, ensure_ascii=False, indent=2))

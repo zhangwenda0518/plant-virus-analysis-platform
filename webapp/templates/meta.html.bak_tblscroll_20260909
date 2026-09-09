@@ -1,0 +1,1393 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="vp-lang" content="{{ lang }}">
+<title>公共数据检索 - 植物病毒分析平台</title>
+<script>try{if(localStorage.getItem("vp_theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
+<link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
+<style>
+  .mono { font-family: var(--mono); font-size: 11.5px; }
+  .tbl-scroll { overflow: auto; max-height: 520px; border: 1px solid var(--line-100); border-radius: 8px; }
+  .meta-tbl { border-collapse: collapse; font-size: 11.5px; }
+  .meta-tbl th { position: sticky; top: 0; background: #f5f5f5; padding: 5px 7px; border: 1px solid #e0e0e0;
+                 white-space: nowrap; font-size: 10.5px; color: #555; z-index: 2; text-align: left; }
+  .meta-tbl th.sortable { cursor: pointer; user-select: none; }
+  .meta-tbl th.sortable:hover { background: #eaf2fb; }
+  .meta-tbl td { padding: 4px 7px; border: 1px solid #ececec; white-space: nowrap; max-width: 280px;
+                 overflow: hidden; text-overflow: ellipsis; }
+  .meta-tbl tbody tr:hover { background: #fafafa; }
+  .meta-tbl td a { color: #0064c8; text-decoration: underline; }
+  .meta-tbl td.editable { cursor: cell; }
+  .meta-tbl td.miss { background: #ffffc8; color: #b43232; }
+  .meta-tbl td.aimark { background: #dcffdc; }
+  .meta-tbl td.sus { background: #fff3e0; color: #e65100; }
+  .meta-tbl td .cell-input { width: 100%; box-sizing: border-box; font: inherit; border: 1.5px solid #4a90d9;
+                 padding: 1px 4px; border-radius: 3px; }
+  .badge2 { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px;
+            background: #eef3f8; color: #456; border: 1px solid #dbe4ee; }
+  .badge2.ok { background: #e9f7ef; color: #217346; border-color: #cdebd8; }
+  .badge2.warn { background: #fff3e0; color: #b35c00; border-color: #f0d0a0; }
+  .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+  .toolbar select { width: auto; max-width: 200px; }
+  .toolbar .sep { width: 1px; height: 22px; background: var(--line-100); margin: 0 2px; }
+  .search-log { font-family: Consolas, var(--mono); font-size: 11px; background: #f8f8f8;
+                border: 1px solid var(--line-100); border-radius: 6px; padding: 6px 8px;
+                max-height: 130px; overflow: auto; white-space: pre-wrap; margin-top: 8px; }
+  .stat-line { font-size: 11.5px; color: #567; margin: 4px 0; }
+  .edit-grid { display: grid; grid-template-columns: 210px 1fr; gap: 14px; }
+  @media (max-width: 900px) { .edit-grid { grid-template-columns: 1fr; } }
+  .rec-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 6px 14px; }
+  .rec-form label { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: #567; }
+  .rec-form input { font-size: 12px; padding: 4px 6px; }
+  .rec-form input.miss { background: #ffffc8; }
+  .rec-form input.aimark { background: #dcffdc; }
+  .rec-nav { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  .fig-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; }
+  .fig-item { border: 1px solid var(--line-100); border-radius: 8px; padding: 8px; background: #fff; }
+  .fig-item img { width: 100%; border-radius: 4px; cursor: zoom-in; }
+  .chart-box { border: 1px solid var(--line-100); border-radius: 8px; padding: 6px; margin-top: 10px; background: #fff; }
+  .chart-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 2px; }
+  .mt-status { position: sticky; bottom: 0; background: var(--bg, #fff); border-top: 1px solid var(--line-100);
+               padding: 6px 4px; font-size: 11.5px; color: #567; font-family: var(--mono); z-index: 5; }
+  .mt-modal { position: fixed; inset: 0; background: rgba(20,30,50,.35); display: flex;
+              align-items: center; justify-content: center; z-index: 50; }
+  .mt-modal .box { background: #fff; border-radius: 10px; padding: 16px 18px; min-width: 420px; max-width: 640px;
+                   max-height: 82vh; overflow: auto; box-shadow: 0 8px 30px rgba(0,0,0,.2); }
+  .combo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px 12px; }
+  .combo-grid label { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #456; }
+  .combo-grid label span { min-width: 108px; text-align: right; }
+  .proj-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+{% include "_nav.html" %}
+
+<div class="page">
+  <div class="tools-layout group-layout">
+    {% include "_group_nav.html" %}
+    <main class="group-main">
+  <div class="pipe-head">
+    <div>
+      <h1 data-i18n="mt.title">🔎 公共数据检索（SRA + GSA）</h1>
+      <p class="hint" data-i18n="mt.hint2">双存储工作台（Search / Info）：检索 SRA + GSA → 表格直接编辑（双击单元格）→ AI 清洗补全 → 图表全景。
+         每次检索自动新建项目并归档到「结果中心」，本页只操作当前项目。</p>
+    </div>
+  </div>
+
+  <!-- 项目条：当前项目 + 切换 + 结果中心入口 -->
+  <div class="card">
+    <div class="proj-bar">
+      <b data-i18n="mt.curColl">当前项目</b>:
+      <select id="mtProjectSel" onchange="switchProject(this.value)" style="max-width:340px"></select>
+      <span id="mtProjBadges" style="display:flex;gap:6px;flex-wrap:wrap"></span>
+      <span style="flex:1"></span>
+      <a class="btn small" href="/results#meta">🗂 <span data-i18n="mt.toResults">结果中心查看全部项目</span></a>
+    </div>
+  </div>
+
+  <!-- 8 标签（复刻 metadata_gui：Search / S-Browse / S-Edit / S-Viz / Info / I-*） -->
+  <nav class="group-topbar" style="margin-top:12px">
+    <div class="gt-items" id="mtPills">
+      <a class="gt-item on" data-sec="search" href="#search">① <span data-i18n="mt.tabSearch">检索</span></a>
+      <a class="gt-item" data-sec="sb" href="#sb">S-<span data-i18n="mt.tabBrowse">浏览</span></a>
+      <a class="gt-item" data-sec="se" href="#se">S-<span data-i18n="mt.tabEdit">编辑</span></a>
+      <a class="gt-item" data-sec="sv" href="#sv">S-<span data-i18n="mt.tabViz">图表</span></a>
+      <a class="gt-item" data-sec="info" href="#info">Info <span data-i18n="mt.tabInfo">提取</span></a>
+      <a class="gt-item" data-sec="ib" href="#ib">I-<span data-i18n="mt.tabBrowse">浏览</span></a>
+      <a class="gt-item" data-sec="ie" href="#ie">I-<span data-i18n="mt.tabEdit">编辑</span></a>
+      <a class="gt-item" data-sec="iv" href="#iv">I-<span data-i18n="mt.tabViz">图表</span></a>
+    </div>
+  </nav>
+
+  <!-- ═══ ① 检索 Search ═══ -->
+  <div class="mt-sec" id="sec-search">
+    <div class="card">
+      <h2 data-i18n="mt.online">在线数据库检索（SRA / GSA）</h2>
+      <div class="toolbar">
+        <span data-i18n="mt.species">物种拉丁名</span>
+        <input id="mtSpecies" type="text" placeholder="如 Lycium barbarum" style="flex:1;min-width:220px" data-i18n-ph="mt.phSpecies"
+               onkeydown="if(event.key==='Enter')doSearch(this)">
+        <span data-i18n="mt.source">测序类型</span>
+        <select id="mtSource">
+          <option value="TRANSCRIPTOMIC">TRANSCRIPTOMIC</option>
+          <option value="GENOMIC">GENOMIC</option>
+          <option value="METAGENOMIC">METAGENOMIC</option>
+          <option value="OTHER">OTHER</option>
+          <option value="All">All</option>
+        </select>
+        <span data-i18n="mt.workers">GSA 并发</span>
+        <input id="mtWorkers" type="number" min="1" max="20" value="5" style="width:64px"
+               data-i18n-title="mt.workersTitle" title="GSA 并发爬取线程数（越高越快，但易触发限流）">
+        <span data-i18n="mt.db">数据库</span>
+        <select id="mtDb">
+          <option value="both">SRA + GSA</option>
+          <option value="sra" data-i18n="mt.onlySra">仅 SRA</option>
+          <option value="gsa" data-i18n="mt.onlyGsa">仅 GSA</option>
+        </select>
+        <button class="btn primary" id="btnSearch" onclick="doSearch(this)" data-i18n="mt.go">🔍 开始检索</button>
+      </div>
+      <label class="chk" style="margin:0"><input type="checkbox" id="mtDetailed" checked>
+        <span data-i18n="mt.detailed">详细模式（解析 Tissue / Location / 发育阶段）</span></label>
+      <div class="search-log" id="searchLog" data-i18n="mt.logIdle">检索进度将显示在这里…</div>
+      <div class="toolbar" id="searchActions" style="display:none">
+        <b id="searchCount" class="stat-line"></b>
+        <button class="btn small primary" onclick="mtShow('sb')" data-i18n="mt.toBrowse">📄 打开 S-浏览（表格可编辑）</button>
+        <button class="btn small" onclick="searchToInfo()" data-i18n="mt.sendInfo">📤 发送到 Info 提取</button>
+        <span style="flex:1"></span>
+        <span class="hint" data-i18n="mt.autoArchive">ⓘ 每次检索自动新建项目并归档到结果中心</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 data-i18n="mt.localFilter">本地元数据筛选（当前 S 存储）</h2>
+      <div class="toolbar">
+        <input id="mtQuick" type="text" style="flex:1;min-width:200px"
+               placeholder="检索已载入记录…（如 'leaf'、'Lycium'，回车筛选）" data-i18n-ph="mt.phLocalFilter"
+               onkeydown="if(event.key==='Enter')localFilter()">
+        <button class="btn small" onclick="localFilter()" data-i18n="mt.filter">筛选</button>
+        <button class="btn small" onclick="localClear()" data-i18n="mt.clear">清除</button>
+      </div>
+      <div class="combo-grid" id="mtLocalFilters"></div>
+      <p class="stat-line" id="mtLocalCount"></p>
+      <div id="mtLocalTbl"><p class="hint" data-i18n="mt.none2">尚无数据——先在上方检索，或切换项目</p></div>
+      <div id="mtLocalPager"></div>
+    </div>
+
+    <h2 class="sec" data-i18n="mt.tasks">运行任务</h2>
+    <div id="taskBox"><p class="hint" data-i18n="c.noTasks">暂无任务</p></div>
+  </div>
+
+  <!-- ═══ S-浏览 ═══ -->
+  <div class="mt-sec" id="sec-sb" style="display:none">
+    <div class="card">
+      <h2>S-<span data-i18n="mt.tabBrowse">浏览</span> · <span data-i18n="mt.searchStore">检索结果</span>（<span data-i18n="mt.dblEdit">双击单元格可直接编辑</span>）</h2>
+      <div class="toolbar">
+        <input id="sbQ" type="text" style="flex:1;min-width:160px" placeholder="全字段检索…（回车筛选，Esc 清除）" data-i18n-ph="mt.phSearchAll"
+               onkeydown="if(event.key==='Enter')browseFilter('sb');if(event.key==='Escape'){this.value='';browseFilter('sb')}">
+        <select id="sbQCol" style="max-width:170px"><option value="" data-i18n="mt.allCols">全部列</option></select>
+        <button class="btn small" onclick="browseFilter('sb')" data-i18n="mt.filter">筛选</button>
+        <button class="btn small" onclick="browseClear('sb')" data-i18n="mt.clear">清除</button>
+        <span class="sep"></span>
+        <button class="btn small" onclick="fillCache('search',this)" data-i18n-title="mt.fillCacheTitle" title="从本地网页缓存 JSON 回填缺失字段"
+                data-i18n="mt.fillCache">🧩 缓存填充</button>
+        <button class="btn small" onclick="aiFillOpen('search')" data-i18n-title="mt.aiFillTitle" title="DeepSeek 清洗/补全缺失元数据"
+                style="color:#0072B2;font-weight:bold" data-i18n="mt.aiFill">✨ AI 补全缺失</button>
+        <span class="sep"></span>
+        <button class="btn small" onclick="importClick('search')" data-i18n="mt.import">📥 导入文件</button>
+        <select id="sbExportFmt"><option value="csv">CSV</option><option value="tsv">TSV</option><option value="xlsx">Excel</option></select>
+        <button class="btn small" onclick="doExport('search','sbExportFmt')" data-i18n="mt.export">⬇ 导出</button>
+        <button class="btn small" onclick="aiSummary('search',this)" style="color:#0072B2;font-weight:bold"
+                data-i18n="mt.aiSummary">📝 AI 总结</button>
+        <button class="btn small danger" onclick="delRows('search')" data-i18n="mt.delRows">🗑 删除选中行</button>
+      </div>
+      <div class="toolbar" id="sbSelBar" style="display:none">
+        <button class="btn small primary" onclick="intoDownload(this)" data-i18n="mt.intoDl">⬇ 勾选 Run 转入数据下载</button>
+        <button class="btn small" onclick="selToInfo()" data-i18n="mt.selInfo">📋 勾选 Run 提取元数据</button>
+        <span class="hint" id="sbSelCount"></span>
+      </div>
+      <p class="stat-line" id="sbStats"></p>
+      <div class="tbl-scroll"><div id="sbTbl"><p class="hint" data-i18n="mt.needSearch">尚无检索结果——先在「① 检索」检索</p></div></div>
+      <div id="sbPager"></div>
+    </div>
+  </div>
+
+  <!-- ═══ S-编辑 ═══ -->
+  <div class="mt-sec" id="sec-se" style="display:none">
+    <div class="card">
+      <h2>S-<span data-i18n="mt.tabEdit">编辑</span> · <span data-i18n="mt.recordDetail">记录详情（行级查看与编辑）</span></h2>
+      <div id="seBox"><p class="hint" data-i18n="mt.needSearch">尚无检索结果——先在「① 检索」检索</p></div>
+    </div>
+  </div>
+
+  <!-- ═══ S-图表 ═══ -->
+  <div class="mt-sec" id="sec-sv" style="display:none">
+    <div class="card">
+      <h2>S-<span data-i18n="mt.tabViz">图表</span> · <span data-i18n="mt.vizTitle">元数据可视化</span></h2>
+      <div class="toolbar">
+        <span data-i18n="mt.mainField">主字段</span>
+        <select id="svField" onchange="loadViz('search')"></select>
+        <button class="btn small" onclick="loadViz('search', true)" data-i18n="mt.refreshCharts">🔄 刷新图表</button>
+        <span class="sep"></span>
+        <button class="btn small primary" onclick="metaPlot(this)" data-i18n="mt.plot">📊 生成 SCI 全景图</button>
+      </div>
+      <div id="svSummary"></div>
+      <div id="svSci"></div>
+      <div id="svCharts"><p class="hint" data-i18n="mt.needSearch">尚无检索结果——先在「① 检索」检索</p></div>
+    </div>
+  </div>
+
+  <!-- ═══ Info 提取 ═══ -->
+  <div class="mt-sec" id="sec-info" style="display:none">
+    <div class="card">
+      <h2>Info · <span data-i18n="mt.info">元数据深度提取（Run → Core14/Full）</span></h2>
+      <p class="hint" data-i18n="mt.infoHint">粘贴 Run 编号（逗号 / 空格 / 换行分隔）；留空 = 使用当前项目检索到的全部 Run。</p>
+      <textarea id="infoRuns" rows="5" style="width:100%;font-family:var(--mono);font-size:12px"
+                placeholder="SRR31651831&#10;CRR1126132&#10;ERR13512478&#10;..."></textarea>
+      <div class="toolbar">
+        <button class="btn small" onclick="infoPullSearch()" data-i18n="mt.pullSearch">📥 从 S-检索拉取</button>
+        <button class="btn small" onclick="$('infoFile').click()" data-i18n="mt.loadFile">📂 载入文件</button>
+        <input type="file" id="infoFile" style="display:none" onchange="infoLoadFile(this)">
+        <input type="file" id="importFile" style="display:none"
+               accept=".csv,.tsv,.xlsx,.xls" onchange="doImport(this)">
+        <button class="btn small" onclick="$('infoRuns').value=''" data-i18n="mt.clear">清除</button>
+        <span class="sep"></span>
+        <label class="chk" style="margin:0"><input type="checkbox" id="mtFillDate" checked>
+          <span data-i18n="mt.fillDate">采集日期缺失时用发布日期兜底</span></label>
+        <input id="infoKey" type="password" placeholder="DeepSeek Key（可选，留空用环境变量/本地规则）" data-i18n-ph="mt.phDeepseekKey"
+               style="width:260px">
+        <span style="flex:1"></span>
+        <button class="btn primary" id="btnInfoRun" onclick="doInfo(this)" data-i18n="mt.infoGo">📋 深度提取元数据</button>
+      </div>
+      <p class="hint" data-i18n="mt.aiHint2">可选：设置环境变量 DEEPSEEK_API_KEY 后自动启用 AI 清洗；未设置时用纯本地规则解析。</p>
+      <div class="search-log" id="infoLog" style="display:none"></div>
+    </div>
+  </div>
+
+  <!-- ═══ I-浏览 ═══ -->
+  <div class="mt-sec" id="sec-ib" style="display:none">
+    <div class="card">
+      <h2>I-<span data-i18n="mt.tabBrowse">浏览</span> · <span data-i18n="mt.infoStore">Core14 统一元数据</span>（<span data-i18n="mt.dblEdit">双击单元格可直接编辑</span>）</h2>
+      <div class="toolbar">
+        <input id="ibQ" type="text" style="flex:1;min-width:160px" placeholder="全字段检索…（回车筛选，Esc 清除）" data-i18n-ph="mt.phSearchAll"
+               onkeydown="if(event.key==='Enter')browseFilter('ib');if(event.key==='Escape'){this.value='';browseFilter('ib')}">
+        <select id="ibQCol" style="max-width:170px"><option value="" data-i18n="mt.allCols">全部列</option></select>
+        <button class="btn small" onclick="browseFilter('ib')" data-i18n="mt.filter">筛选</button>
+        <button class="btn small" onclick="browseClear('ib')" data-i18n="mt.clear">清除</button>
+        <span class="sep"></span>
+        <button class="btn small" onclick="fillCache('core14',this)" data-i18n-title="mt.fillCacheTitle" title="从本地网页缓存 JSON 回填缺失字段"
+                data-i18n="mt.fillCache">🧩 缓存填充</button>
+        <button class="btn small" onclick="aiFillOpen('core14')" data-i18n-title="mt.aiFillTitle" title="DeepSeek 清洗/补全缺失元数据"
+                style="color:#0072B2;font-weight:bold" data-i18n="mt.aiFill">✨ AI 补全缺失</button>
+        <span class="sep"></span>
+        <button class="btn small" onclick="importClick('core14')" data-i18n="mt.import">📥 导入文件</button>
+        <select id="ibExportFmt"><option value="csv">CSV</option><option value="tsv">TSV</option><option value="xlsx">Excel</option></select>
+        <button class="btn small" onclick="doExport('core14','ibExportFmt')" data-i18n="mt.export">⬇ 导出</button>
+        <a class="btn small" id="ibFullDl" href="#" download data-i18n="mt.fullDl">⬇ Full 明细</a>
+        <button class="btn small" onclick="aiSummary('core14',this)" style="color:#0072B2;font-weight:bold"
+                data-i18n="mt.aiSummary">📝 AI 总结</button>
+        <button class="btn small danger" onclick="delRows('core14')" data-i18n="mt.delRows">🗑 删除选中行</button>
+      </div>
+      <div class="toolbar" id="ibSelBar" style="display:none">
+        <button class="btn small primary" onclick="intoDownload(this,'core14')" data-i18n="mt.intoDl">⬇ 勾选 Run 转入数据下载</button>
+        <span class="hint" id="ibSelCount"></span>
+      </div>
+      <p class="stat-line" id="ibStats"></p>
+      <div class="tbl-scroll"><div id="ibTbl"><p class="hint" data-i18n="mt.needInfo">尚无元数据——在「Info 提取」运行深度提取</p></div></div>
+      <div id="ibPager"></div>
+    </div>
+  </div>
+
+  <!-- ═══ I-编辑 ═══ -->
+  <div class="mt-sec" id="sec-ie" style="display:none">
+    <div class="card">
+      <h2>I-<span data-i18n="mt.tabEdit">编辑</span> · <span data-i18n="mt.recordDetail">记录详情（行级查看与编辑）</span></h2>
+      <div id="ieBox"><p class="hint" data-i18n="mt.needInfo">尚无元数据——在「Info 提取」运行深度提取</p></div>
+    </div>
+  </div>
+
+  <!-- ═══ I-图表 ═══ -->
+  <div class="mt-sec" id="sec-iv" style="display:none">
+    <div class="card">
+      <h2>I-<span data-i18n="mt.tabViz">图表</span> · <span data-i18n="mt.vizTitle">元数据可视化</span></h2>
+      <div class="toolbar">
+        <span data-i18n="mt.mainField">主字段</span>
+        <select id="ivField" onchange="loadViz('core14')"></select>
+        <button class="btn small" onclick="loadViz('core14', true)" data-i18n="mt.refreshCharts">🔄 刷新图表</button>
+        <span class="sep"></span>
+        <button class="btn small primary" onclick="metaPlot(this)" data-i18n="mt.plot">📊 生成 SCI 全景图</button>
+      </div>
+      <div id="ivSummary"></div>
+      <div id="ivSci"></div>
+      <div id="ivCharts"><p class="hint" data-i18n="mt.needInfo">尚无元数据——在「Info 提取」运行深度提取</p></div>
+    </div>
+  </div>
+
+  <div class="mt-status" id="mtStatus">Search: 0 rows | Info: 0 rows</div>
+  </main>
+  </div>
+</div>
+
+<!-- AI 补全弹窗 -->
+<div class="mt-modal" id="aiModal" style="display:none">
+  <div class="box">
+    <h2 style="margin-top:0" id="aiTitle" data-i18n="mt.aiTitle">✨ AI 补全缺失（DeepSeek）</h2>
+    <p class="hint" id="aiWhichLabel"></p>
+    <p class="hint" data-i18n="mt.aiFillHint">AI 将对含部分信息的记录做去污染 / 归位 / 格式化（Location 按机构推断，标注 _AI 后缀）；绿色单元格 = AI 修改。需要环境变量 DEEPSEEK_API_KEY。</p>
+    <div class="toolbar">
+      <span data-i18n="mt.model">模型</span>
+      <select id="aiModel">
+        <option value="deepseek-v4-flash" data-i18n="mt.modelFlash">deepseek-v4-flash（快速）</option>
+        <option value="deepseek-v4-pro" data-i18n="mt.modelPro">deepseek-v4-pro（深度）</option>
+      </select>
+    </div>
+    <div class="stat-line" id="aiProg"></div>
+    <div class="toolbar" style="justify-content:flex-end">
+      <button class="btn small danger" id="aiStop" style="display:none;margin-right:auto" onclick="aiStopTask()" data-i18n="mt.stopBtn">⏹ 停止</button>
+      <button class="btn" onclick="aiModalClose()" data-i18n="c.close">关闭</button>
+      <button class="btn primary" id="aiStart" onclick="aiFillStart()" data-i18n="mt.aiGo">▶ 开始 AI 补全</button>
+    </div>
+  </div>
+</div>
+
+<!-- AI 总结弹窗 -->
+<div class="mt-modal" id="sumModal" style="display:none">
+  <div class="box" style="min-width:560px">
+    <h2 style="margin-top:0">📝 AI <span data-i18n="mt.aiSummary">总结</span></h2>
+    <textarea id="sumText" rows="12" style="width:100%;font-size:13px;line-height:1.6"></textarea>
+    <div class="toolbar" style="justify-content:flex-end">
+      <button class="btn" onclick="copySum()" data-i18n="c.copy">复制</button>
+      <button class="btn primary" onclick="$('sumModal').style.display='none'" data-i18n="c.close">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/i18n.js?v={{ asset_v }}"></script>
+<script src="/static/app.js?v={{ asset_v }}"></script>
+<script src="/static/plotly.min.js?v={{ asset_v }}"></script>
+<script>
+/* ═════════ 公共数据检索工作台（复刻 MMPV-RNA metadata_gui 双存储 8 标签） ═════════ */
+'use strict';
+
+async function jfetch(url, opts) {
+  const r = await fetch(url, opts);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+  return d;
+}
+
+const MT = {
+  project: '', colls: [],
+  page: {local: 1, sb: 1, ib: 1},
+  perPage: {local: 20, sb: 20, ib: 20},
+  sort: {},                       // view -> {col, dir}
+  filter: {local: {q: '', fields: {}}, sb: {q: '', qcol: '', fields: {}},
+           ib: {q: '', qcol: '', fields: {}}},
+  cols: {},                       // which -> [columns]
+  sel: {search: new Set(), core14: new Set()},
+  aiMarks: new Set(),             // `${which}:${row}:${col}` 本会话 AI 修改标记（绿色）
+  editRow: {search: -1, core14: -1},
+  recData: {search: null, core14: null},
+  vizField: {search: 'Tissue', core14: 'Tissue'},
+  importWhich: 'search',
+  aiWhich: 'search',
+  lastData: {},                   // view -> 最近一次表响应（统计行轻量更新用）
+};
+
+const VIEW = {
+  local: {which: 'search', box: 'mtLocalTbl', pager: 'mtLocalPager',
+          stats: 'mtLocalCount', editable: false, checks: false},
+  sb:    {which: 'search', box: 'sbTbl', pager: 'sbPager', stats: 'sbStats',
+          editable: true, checks: true},
+  ib:    {which: 'core14', box: 'ibTbl', pager: 'ibPager', stats: 'ibStats',
+          editable: true, checks: true},
+};
+
+const LINK_COLS = new Set(['Run', 'BioProject', 'PMID', 'BioSample', 'TaxID']);
+const NA_SET = new Set(['na', 'n/a', 'not_provided', 'not_provided.', 'not collected',
+                        'missing', 'none', 'unknown', 'nan', '-', '', ' ']);
+const FILTER_FIELDS = ['ScientificName', 'Tissue', 'Source', 'Location',
+                       'BioProject', 'LibrarySource', 'CenterName'];
+const PLOT_TITLES = {
+  'Combined_Landscape_Full': 'mt.figAll',
+  'Panel_A_temporal': 'mt.figA',
+  'Panel_B_database': 'mt.figB',
+  'Panel_C_organizations': 'mt.figC',
+  'Panel_D_tissues': 'mt.figD',
+  'Panel_E_regions': 'mt.figE',
+  'Panel_F_stages': 'mt.figF',
+};
+const figTitle = f => PLOT_TITLES[f.replace(/\.(png|pdf)$/, '')]
+  ? t(PLOT_TITLES[f.replace(/\.(png|pdf)$/, '')]) : f;
+const isNa = v => NA_SET.has(String(v ?? '').trim().toLowerCase());
+
+function buildUrl(col, v) {
+  v = String(v ?? '').trim();
+  if (!v) return '';
+  const c = col.toLowerCase();
+  if (c === 'run') {
+    if (/^(SRR|ERR|DRR|SRX|ERX|DRX)/.test(v))
+      return 'https://www.ncbi.nlm.nih.gov/sra/' + v;
+    if (v.startsWith('CRR'))
+      return 'https://ngdc.cncb.ac.cn/gsa/search?searchTerm=' + v;
+    return 'https://www.ncbi.nlm.nih.gov/sra/?term=' + v;
+  }
+  if (c === 'bioproject') {
+    if (v.startsWith('PRJNA')) return 'https://www.ncbi.nlm.nih.gov/bioproject/' + v;
+    if (v.startsWith('PRJCA') || v.startsWith('PRJEB'))
+      return 'https://ngdc.cncb.ac.cn/bioproject/browse/' + v;
+    return 'https://www.ncbi.nlm.nih.gov/bioproject/?term=' + v;
+  }
+  if (c === 'pmid')
+    return /^\d+$/.test(v) ? 'https://pubmed.ncbi.nlm.nih.gov/' + v + '/'
+      : 'https://pubmed.ncbi.nlm.nih.gov/?term=' + v;
+  if (c === 'biosample')
+    return /^(SAMN|SAME)/.test(v) ? 'https://www.ncbi.nlm.nih.gov/biosample/' + v
+      : 'https://ngdc.cncb.ac.cn/biosample/' + v;
+  if (c === 'taxid')
+    return /^\d+$/.test(v) ? 'https://www.ncbi.nlm.nih.gov/taxonomy/' + v : '';
+  return '';
+}
+
+/* ── 标签切换（懒加载） ── */
+const MT_SECS = ['search', 'sb', 'se', 'sv', 'info', 'ib', 'ie', 'iv'];
+function mtShow(id) {
+  if (!MT_SECS.includes(id)) id = 'search';
+  document.querySelectorAll('.mt-sec').forEach(el => {
+    el.style.display = el.id === 'sec-' + id ? '' : 'none';
+  });
+  document.querySelectorAll('#mtPills .gt-item').forEach(a => {
+    a.classList.toggle('on', a.dataset.sec === id);
+  });
+  history.replaceState(null, '', '/meta?p=' + encodeURIComponent(MT.project || '') + '#' + id);
+  if (id === 'sb') loadView('sb');
+  else if (id === 'ib') loadView('ib');
+  else if (id === 'se') loadRecord('search');
+  else if (id === 'ie') loadRecord('core14');
+  else if (id === 'sv') loadViz('search');
+  else if (id === 'iv') loadViz('core14');
+  else if (id === 'search') { loadView('local'); refreshTasks(); }
+}
+(function mtPillInit() {
+  document.querySelectorAll('#mtPills .gt-item').forEach(a => {
+    a.addEventListener('click', ev => {
+      ev.preventDefault(); mtShow(a.dataset.sec);
+    });
+  });
+})();
+
+/* ── 项目管理 ── */
+async function loadColls() {
+  try {
+    MT.colls = await jfetch('/api/meta/collections');
+  } catch (e) { setConnBanner(true); return; }
+  const sel = $('mtProjectSel');
+  sel.innerHTML = MT.colls.length
+    ? MT.colls.map(c => `<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('')
+    : `<option value="">${t('mt.noProj')}</option>`;
+  sel.value = MT.project;
+  renderProjBadges();
+  updateStatus();
+}
+
+function renderProjBadges() {
+  const c = MT.colls.find(x => x.name === MT.project);
+  const box = $('mtProjBadges');
+  if (!c) { box.innerHTML = ''; return; }
+  const n = v => (v == null ? '—' : Number(v).toLocaleString());
+  const b = [];
+  if (c.search) b.push(`<span class="badge2 ok">${t('mt.badgeSearch', '检索 {n}').replace('{n}', n(c.n_runs))}</span>`);
+  if (c.core14) b.push(`<span class="badge2 ${c.stale ? 'warn' : ''}">Core14 ${n(c.n_core14)}</span>`);
+  if (c.full) b.push(`<span class="badge2 ${c.stale ? 'warn' : ''}">${t('mt.badgeFull', 'Full {n}').replace('{n}', n(c.n_full))}</span>`);
+  if (c.n_plots) b.push(`<span class="badge2">${t('mt.badgePlots', '图表 {n}').replace('{n}', n(c.n_plots))}</span>`);
+  if (c.stale) b.push(`<span class="badge2 warn" title="${t('mt.staleTitle')}">${t('mt.stale')}</span>`);
+  box.innerHTML = b.join(' ');
+}
+
+function updateStatus() {
+  const c = MT.colls.find(x => x.name === MT.project) || {};
+  $('mtStatus').textContent =
+    `Search: ${c.n_runs ?? 0} rows | Info: ${c.n_core14 ?? 0} rows | ${t('mt.curColl')}: ${MT.project || '—'}`;
+}
+
+async function switchProject(name) {
+  if (!name) return;
+  await setProject(name);
+  mtShow((location.hash || '').replace('#', '') || 'search');
+}
+
+async function setProject(name) {
+  MT.project = name;
+  MT.page = {local: 1, sb: 1, ib: 1};
+  MT.sort = {};
+  MT.filter = {local: {q: '', fields: {}}, sb: {q: '', qcol: '', fields: {}},
+               ib: {q: '', qcol: '', fields: {}}};
+  MT.sel = {search: new Set(), core14: new Set()};
+  MT.editRow = {search: -1, core14: -1};
+  MT.recData = {search: null, core14: null};
+  MT.aiMarks.clear();
+  MT.cols = {};
+  MT.lastData = {};
+  $('mtProjectSel').value = name;
+  history.replaceState(null, '', '/meta?p=' + encodeURIComponent(name));
+  renderProjBadges();
+  updateStatus();
+  await Promise.all([loadView('local'), loadView('sb'), loadView('ib')]);
+  await Promise.all([buildLocalFilters(), buildQColSelects()]);
+  const full = $('ibFullDl');
+  full.href = `/meta_files/${encodeURIComponent(name)}/info/Global_Unified_Metadata_Full.csv`;
+}
+
+/* ── 通用表格视图（local 只读 / sb·ib 可编辑+勾选） ── */
+function viewQuery(vkey) {
+  const v = VIEW[vkey];
+  const so = MT.sort[vkey] || {};
+  const f = MT.filter[vkey];
+  const qs = new URLSearchParams({
+    which: v.which, page: MT.page[vkey], per_page: MT.perPage[vkey]});
+  if (so.col) { qs.set('sort', so.col); qs.set('dir', so.dir); }
+  if (f.q) { qs.set('q', f.q); if (f.qcol) qs.set('qcol', f.qcol); }
+  for (const [k, val] of Object.entries(f.fields || {}))
+    if (val && val !== '(any)') qs.set('f.' + k, val);
+  return qs;
+}
+
+async function loadView(vkey, page) {
+  const v = VIEW[vkey];
+  if (!MT.project) return;
+  if (page) MT.page[vkey] = page;
+  const box = $(v.box);
+  try {
+    const d = await jfetch(`/api/meta/table/${encodeURIComponent(MT.project)}?${viewQuery(vkey)}`);
+    MT.cols[v.which] = d.columns;
+    renderView(vkey, d);
+  } catch (e) {
+    box.innerHTML = `<p class="hint">ⓘ ${esc(e.message)}</p>`;
+    $(v.pager).innerHTML = '';
+    $(v.stats).textContent = '';
+  }
+  updateSelBar(vkey);
+}
+
+function renderView(vkey, d) {
+  MT.lastData[vkey] = d;
+  const v = VIEW[vkey];
+  const so = MT.sort[vkey] || {};
+  const head = (v.checks ? '<th style="width:26px">✓</th>' : '') +
+    d.columns.map((c, i) => {
+      const arrow = so.col === c ? (so.dir === 'asc' ? ' ▲' : ' ▼') : '';
+      return `<th class="sortable" data-sortcol="${esc(c)}" title="${esc(t('mt.sortTip'))}">${esc(c)}${arrow}</th>`;
+    }).join('');
+  const body = d.rows.map((row, i) => {
+    const rid = d.row_ids[i];
+    const run = d.run_col != null ? row[d.run_col] : '';    const tds = row.map((val, ci) => {
+      const col = d.columns[ci];
+      const miss = isNa(val);
+      const url = (!miss && LINK_COLS.has(col)) ? buildUrl(col, val) : null;
+      const cls = [];
+      if (miss) cls.push('miss');
+      if (MT.aiMarks.has(`${v.which}:${rid}:${col}`)) cls.push('aimark');
+      if (val && /XXXX|YYYY|Country:Region|SAMNXX|PRJNAXX/.test(String(val))) cls.push('sus');
+      if (url) cls.push('link');
+      const editable = v.editable && !url;
+      if (editable) cls.push('editable');
+      let inner;
+      if (url) inner = `<a href="${esc(url)}" target="_blank" rel="noopener" title="点击在浏览器打开（行级编辑页可修改）">${esc(val)}</a>`;
+      if (col === 'Run' && !miss && /^[A-Z]{2,4}\d+\.?\d*$/.test(String(val).trim()))
+        inner += ` <a href="javascript:void(0)" onclick="dlOneRun('${esc(String(val).trim())}')" title="${esc(t('mt.dlRunTip'))}" style="text-decoration:none">⬇</a>`;
+      else if (miss) inner = esc(val) || '&nbsp;';
+      else inner = esc(val);
+      return `<td class="${cls.join(' ')}" data-col="${esc(col)}"${editable ? ` title="${esc(t('mt.dblEditTip'))}"` : ''}>${inner}</td>`;
+    }).join('');
+    const chk = v.checks
+      ? `<td><input type="checkbox" data-run="${esc(run)}" data-rid="${rid}" ${MT.sel[v.which].has(String(rid)) ? 'checked' : ''}></td>` : '';
+    return `<tr>${chk}${tds}</tr>`;
+  }).join('');
+  $(v.box).innerHTML =
+    `<table class="meta-tbl"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  const pct = d.total ? (d.n_missing / (d.total * d.columns.length) * 100) : 0;
+  $(v.stats).innerHTML =
+    t('mt.stats', '共 {total} 行 · 筛选后 {filtered} 行 · 缺失单元格 {miss}（{pct}%）')
+      .replace('{total}', d.total.toLocaleString()).replace('{filtered}', d.filtered.toLocaleString())
+      .replace('{miss}', d.n_missing.toLocaleString()).replace('{pct}', pct.toFixed(1)) +
+    (v.editable ? ` · <b>${t('mt.dblEdit', '双击单元格可直接编辑')}</b>` : '') +
+    ` · <a href="${d.download}" download>⬇ ${t('mt.rawDl', '下载原始表')}</a>`;
+  $(v.pager).innerHTML = pagerHtml(d.page, d.pages, `pageView('${vkey}','{p}')`);
+}
+
+function pageView(vkey, p) { loadView(vkey, p); }
+
+function sortByView(vkey, col) {
+  const so = MT.sort[vkey] || (MT.sort[vkey] = {});
+  if (so.col === col) so.dir = so.dir === 'asc' ? 'desc' : 'asc';
+  else { so.col = col; so.dir = 'asc'; }
+  loadView(vkey, 1);
+}
+
+/* 表格事件委托：排序 / 双击编辑 / 勾选 */
+for (const [vkey, v] of Object.entries(VIEW)) {
+  $(v.box).addEventListener('click', ev => {
+    const th = ev.target.closest('th[data-sortcol]');
+    if (th) sortByView(vkey, th.dataset.sortcol);
+  });
+  if (v.checks) {
+    $(v.box).addEventListener('change', ev => {
+      const cb = ev.target.closest('input[type="checkbox"][data-rid]');
+      if (!cb) return;
+      if (cb.checked) MT.sel[v.which].add(cb.dataset.rid);
+      else MT.sel[v.which].delete(cb.dataset.rid);
+      updateSelBar(vkey);
+    });
+  }
+  if (v.editable) {
+    $(v.box).addEventListener('dblclick', ev => {
+      const td = ev.target.closest('td.editable');
+      if (!td) return;
+      const tr = td.closest('tr');
+      cellEdit(td, v.which, tr, td.dataset.col);
+    });
+  }
+}
+
+function updateSelBar(vkey) {
+  const v = VIEW[vkey];
+  if (!v.checks) return;
+  const bar = $(vkey === 'sb' ? 'sbSelBar' : 'ibSelBar');
+  const cnt = $(vkey === 'sb' ? 'sbSelCount' : 'ibSelCount');
+  const n = MT.sel[v.which].size;
+  bar.style.display = n ? '' : 'none';
+  cnt.textContent = t('mt.selN', '已勾选 {n} 行').replace('{n}', n);
+}
+
+/* ── 双击单元格行内编辑 ── */
+function cellEdit(td, which, tr, col) {
+  if (td.querySelector('input')) return;
+  // 可编辑视图（sb/ib）均带勾选框，data-rid 即该行绝对行号
+  const cb = tr.querySelector('input[type="checkbox"][data-rid]');
+  if (!cb) return;
+  const rid = Number(cb.dataset.rid);
+  const old = td.textContent.replace(/\u00A0/g, ' ').trim();
+  td.dataset.editing = '1';
+  const w = td.clientWidth;
+  td.innerHTML = `<input class="cell-input" style="width:${Math.max(w, 90)}px">`;
+  const inp = td.firstChild;
+  inp.value = old;
+  inp.focus(); inp.select();
+  let closed = false;
+  const finish = async commit => {
+    if (closed) return; closed = true;
+    const nv = inp.value;
+    td.innerHTML = esc(old) || '&nbsp;';
+    delete td.dataset.editing;
+    if (!commit || nv === old) return;
+    try {
+      const r = await jfetch('/api/meta/cell', {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name: MT.project, which, row: rid, col, value: nv})});
+      td.textContent = r.value;
+      td.classList.remove('miss', 'sus');
+      if (isNa(r.value)) td.classList.add('miss');
+      MT.aiMarks.delete(`${which}:${rid}:${col}`);
+      updateStats(vkeyOf(which), r.n_missing);
+    } catch (e) { toast(t('mt.editFail', '编辑失败'), e.message, {ttl: 5000}); }
+  };
+  inp.onblur = () => finish(true);
+  inp.onkeydown = ev => {
+    if (ev.key === 'Enter') { ev.preventDefault(); inp.onblur = null; finish(true); }
+    else if (ev.key === 'Escape') { inp.onblur = null; finish(false); }
+  };
+}
+function vkeyOf(which) { return which === 'search' ? 'sb' : 'ib'; }
+
+/* 编辑后轻量刷新统计行（不整表重载） */
+function updateStats(vkey, nMissing) {
+  const d = MT.lastData[vkey];
+  const v = VIEW[vkey];
+  if (!d || !v) return;
+  d.n_missing = nMissing;
+  const pct = d.total ? (d.n_missing / (d.total * d.columns.length) * 100) : 0;
+  $(v.stats).innerHTML =
+    t('mt.stats', '共 {total} 行 · 筛选后 {filtered} 行 · 缺失单元格 {miss}（{pct}%）')
+      .replace('{total}', d.total.toLocaleString()).replace('{filtered}', d.filtered.toLocaleString())
+      .replace('{miss}', d.n_missing.toLocaleString()).replace('{pct}', pct.toFixed(1)) +
+    (v.editable ? ` · <b>${t('mt.dblEdit', '双击单元格可直接编辑')}</b>` : '') +
+    ` · <a href="${d.download}" download>⬇ ${t('mt.rawDl', '下载原始表')}</a>`;
+}
+
+/* ── 浏览视图筛选 ── */
+function browseFilter(vkey) {
+  const f = MT.filter[vkey];
+  f.q = val(vkey === 'sb' ? 'sbQ' : 'ibQ');
+  f.qcol = val(vkey === 'sb' ? 'sbQCol' : 'ibQCol');
+  loadView(vkey, 1);
+}
+function browseClear(vkey) {
+  $(vkey === 'sb' ? 'sbQ' : 'ibQ').value = '';
+  $(vkey === 'sb' ? 'sbQCol' : 'ibQCol').value = '';
+  MT.filter[vkey] = {q: '', qcol: '', fields: {}};
+  loadView(vkey, 1);
+}
+async function buildQColSelects() {
+  for (const which of ['search', 'core14']) {
+    const selId = which === 'search' ? 'sbQCol' : 'ibQCol';
+    const sel = $(selId);
+    const cur = sel.value;
+    sel.innerHTML = `<option value="">${t('mt.allCols', '全部列')}</option>` +
+      (MT.cols[which] || []).map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+    sel.value = cur;
+  }
+}
+
+/* ── 检索页本地筛选（7 字段组合，对应 GUI Local Metadata Filter） ── */
+async function buildLocalFilters() {
+  const grid = $('mtLocalFilters');
+  const cols = MT.cols.search || [];
+  const fields = FILTER_FIELDS.filter(f => cols.includes(f));
+  if (!fields.length) { grid.innerHTML = ''; return; }
+  let vals = {};
+  try {
+    const d = await jfetch(`/api/meta/unique/${encodeURIComponent(MT.project)}?which=search&cols=${fields.join(',')}`);
+    vals = d.values || {};
+  } catch (e) { /* 忽略 */ }
+  const cur = MT.filter.local.fields;
+  grid.innerHTML = fields.map(f => `
+    <label><span>${esc(f)}:</span>
+      <select data-ff="${esc(f)}" style="flex:1;min-width:110px">
+        <option value="(any)">(any)</option>
+        ${(vals[f] || []).map(v => `<option value="${esc(v)}" ${cur[f] === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}
+      </select></label>`).join('');
+  grid.querySelectorAll('select[data-ff]').forEach(sel => {
+    sel.onchange = () => {
+      MT.filter.local.fields[sel.dataset.ff] = sel.value;
+      loadView('local', 1);
+    };
+  });
+}
+function localFilter() {
+  MT.filter.local.q = val('mtQuick');
+  loadView('local', 1);
+}
+function localClear() {
+  $('mtQuick').value = '';
+  MT.filter.local = {q: '', fields: {}};
+  buildLocalFilters();
+  loadView('local', 1);
+}
+
+/* ── 在线检索 ── */
+async function doSearch(btn) {
+  const species = val('mtSpecies');
+  if (!species) { alert(t('mt.needSpecies', '请填写物种拉丁名')); return; }
+  $('searchActions').style.display = 'none';
+  $('searchLog').textContent = `> ${t('mt.searching', '正在检索')}: ${species}\n`;
+  try {
+    const d = await jfetch('/api/meta/search', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({species, source: val('mtSource'), db: val('mtDb'),
+                            detailed: $('mtDetailed').checked,
+                            workers: Number(val('mtWorkers')) || 5})});
+    await setProject(d.name);
+    mtShow('search');
+    pollLog(d.task, 'searchLog');
+    toast(t('mt.started', '检索任务已启动'), d.name, {ttl: 4000});
+    watchTaskBtn(d.task, btn, '⏳ 检索中…', async t2 => {
+      await loadColls();
+      $('searchActions').style.display = '';
+      $('searchCount').textContent = t2.status === 'done'
+        ? t('mt.done', '✓ 检索完成')
+        : `✘ ${t2.error || t2.status}`;
+      if (t2.status === 'done') { loadView('local'); loadView('sb'); }
+      refreshTasks();
+    }, {cancelable: true});
+  } catch (e) { alert(e.message); }
+}
+
+function searchToInfo() {
+  $('infoRuns').value = '';
+  mtShow('info');
+  toast(t('mt.sendInfo', '📤 发送到 Info 提取'),
+        t('mt.sendInfoHint', '输入框留空 = 提取当前项目全部检索 Run'), {ttl: 6000});
+}
+
+/* ── 任务日志流式跟随 ── */
+function pollLog(tid, boxId, onEnd) {
+  const box = $(boxId);
+  box.style.display = '';
+  let seen = 0, fails = 0;
+  const timer = setInterval(async () => {
+    let t2 = null;
+    try {
+      const r = await fetch('/api/task/' + tid);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      t2 = await r.json();
+      fails = 0;
+    } catch (e) {
+      if (++fails >= 15) {
+        clearInterval(timer);
+        box.textContent += '\n' + t('mt.pollLost') + '\n';
+        if (onEnd) onEnd({status: 'failed', error: t('mt.pollLostErr')});
+      }
+      return;
+    }
+    if (t2.log && t2.log.length) {
+      const fresh = t2.log.slice(Math.min(seen, t2.log.length));
+      if (fresh.length) {
+        box.textContent += fresh.join('\n') + '\n';
+        seen = t2.log.length;
+        box.scrollTop = box.scrollHeight;
+      }
+    }
+    if (t2.status && t2.status !== 'running') {
+      clearInterval(timer);
+      if (t2.status !== 'done' && t2.error)
+        box.textContent += `[ERROR] ${t2.error}\n`;
+      if (onEnd) onEnd(t2);
+    }
+  }, 2000);
+  return timer;
+}
+
+/* ── 页面任务列表（可停止；单轮询循环防叠加） ── */
+let _taskTimer = null;
+async function refreshTasks() {
+  if (_taskTimer) { clearTimeout(_taskTimer); _taskTimer = null; }
+  try {
+    const list = await jfetch('/api/tasks');
+    const mine = list.filter(t2 => /^(元数据|公共检索|AI 元数据补全|检索绘图)/.test(t2.name || ''));
+    const box = $('taskBox');
+    if (!mine.length) { box.innerHTML = `<p class="hint">${t('c.noTasks', '暂无任务')}</p>`; return; }
+    box.innerHTML = mine.map(task => {
+      const st = task.status === 'running' ? 'running' : task.status === 'done' ? 'done' : 'failed';
+      const stText = task.status === 'running' ? t('c.st.running', '运行中')
+        : task.status === 'done' ? t('c.st.done', '已完成')
+        : task.status === 'cancelled' ? t('mt.stopped', '已停止') : t('c.st.failed', '失败');
+      return `<div class="card">
+        <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
+          <b>${esc(task.name)}</b>
+          <span style="display:flex;gap:8px;align-items:center">
+            ${task.status === 'running' ? `<button class="btn small danger" onclick="cancelTask('${task.id}')">${t('mt.stopBtn')}</button>` : ''}
+            <span class="tstat ${st}">${stText}</span>
+          </span>
+        </div>
+        ${task.msg ? `<p class="hint" style="margin:4px 0 0">${esc(task.msg)}${task.pct != null ? ' · ' + Math.round(task.pct) + '%' : ''}</p>` : ''}
+        ${task.error ? `<div class="err">${esc(task.error)}</div>` : ''}
+      </div>`;
+    }).join('');
+    const running = mine.some(t2 => t2.status === 'running');
+    _taskTimer = setTimeout(refreshTasks, running ? 2500 : 10000);
+  } catch (e) { /* ignore */ }
+}
+async function cancelTask(tid) {
+  try { await jfetch(`/api/task/${tid}/cancel`, {method: 'POST'}); refreshTasks(); }
+  catch (e) { alert(e.message); }
+}
+
+/* ── 勾选行 → 数据下载 / Info 提取 ── */
+async function intoDownload(btn, which) {
+  which = which || 'search';
+  if (!MT.sel[which] || !MT.sel[which].size) { alert(t('mt.needSel', '请先勾选 Run')); return; }
+  await withBtn(btn, async () => {
+    try {
+      const items = await runsOfRows(which, [...MT.sel[which]]);
+      if (!items.length) { alert(t('mt.needSel', '请先勾选 Run')); return; }
+      await jfetch('/api/dl/create', {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name: MT.project + '_runs', items, concurrency: 2})});
+      toast(t('mt.intoOk', '已转入数据下载'), `${items.length} runs`, {ttl: 6000});
+      setTimeout(() => location.href = '/download', 900);
+    } catch (e) { alert(e.message); }
+  }, '⏳ 转入中…');
+}
+
+/* 行内 ⬇：单个 Run 直接转入数据下载 */
+async function dlOneRun(run) {
+  const name = ((MT.project || 'meta') + '_runs').replace(/[^\w\-.]+/g, '_');
+  try {
+    await jfetch('/api/dl/create', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name, items: [run], concurrency: 2})});
+    toast(t('mt.intoOk', '已转入数据下载'), run, {ttl: 5000});
+    setTimeout(() => location.href = '/download', 700);
+  } catch (e) { alert(e.message); }
+}
+
+async function runsOfRows(which, rids) {
+  // 用 qcol 不行——直接拉大页（每页 500），按 row_ids 映射出 Run
+  const qs = new URLSearchParams({which, per_page: 500});
+  const runs = [];
+  let page = 1, pages = 1;
+  const want = new Set(rids.map(Number));
+  do {
+    qs.set('page', page);
+    const d = await jfetch(`/api/meta/table/${encodeURIComponent(MT.project)}?${qs}`);
+    pages = d.pages;
+    d.rows.forEach((row, i) => {
+      if (want.has(d.row_ids[i]) && d.run_col != null) runs.push(String(row[d.run_col]).trim());
+    });
+    page++;
+  } while (page <= pages);
+  return runs.filter(Boolean);
+}
+
+async function selToInfo() {
+  if (!MT.sel.search.size) { alert(t('mt.needSel', '请先勾选 Run')); return; }
+  const runs = await runsOfRows('search', [...MT.sel.search]);
+  if (!runs.length) { alert(t('mt.needSel', '请先勾选 Run')); return; }
+  $('infoRuns').value = runs.join('\n');
+  mtShow('info');
+}
+
+/* ── Info 深度提取 ── */
+function infoPullSearch() {
+  // GUI「Pull from Search Results」：留空即代表全部，明确提示即可（避免大表全量传输）
+  $('infoRuns').value = '';
+  $('infoRuns').placeholder = t('mt.pullHint', '（留空 = 使用当前项目检索到的全部 Run）');
+  toast(t('mt.pullSearch', '📥 从 S-检索拉取'),
+        t('mt.pullHint2', '已置空输入框：直接点「深度提取」即对全部检索 Run 运行'), {ttl: 6000});
+}
+function infoLoadFile(inp) {
+  const f = inp.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = () => { $('infoRuns').value = String(r.result || ''); };
+  r.readAsText(f);
+  inp.value = '';
+}
+async function doInfo(btn) {
+  const txt = $('infoRuns').value.trim();
+  let runs = null;
+  if (txt) {
+    runs = txt.split(/[\s,;\n]+/).filter(Boolean);
+    if (!runs.length) runs = null;
+  }
+  try {
+    const d = await jfetch('/api/meta/info', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({collection: MT.project, runs,
+                            fill_date: $('mtFillDate').checked,
+                            deepseek_api: val('infoKey') || undefined})});
+    pollLog(d.task, 'infoLog');
+    toast(t('mt.started', '任务已启动'), d.task, {ttl: 4000});
+    refreshTasks();
+    watchTaskBtn(d.task, btn, '⏳ 提取中…', async t2 => {
+      await loadColls();
+      if (t2.status === 'done') {
+        await Promise.all([loadView('ib'), buildQColSelects()]);
+        loadRecordIfActive('core14');
+        mtShow('ib');
+        toast(t('mt.infoDone', '✓ 元数据提取完成'), t('mt.infoDone2', '已切换到 I-浏览'), {ttl: 5000});
+      }
+    }, {cancelable: true});
+  } catch (e) { alert(e.message); }
+}
+function loadRecordIfActive(which) {
+  const sec = which === 'search' ? 'se' : 'ie';
+  const pill = document.querySelector(`#mtPills .gt-item[data-sec="${sec}"]`);
+  if (pill && pill.classList.contains('on')) loadRecord(which);
+}
+
+/* ── 行级编辑面板（S-Edit / I-Edit，对应 GUI DetailEditPanel） ── */
+async function loadRecord(which, row) {
+  const box = $(which === 'search' ? 'seBox' : 'ieBox');
+  if (!MT.project || !(MT.cols[which] || []).length) {
+    box.innerHTML = `<p class="hint">${which === 'search'
+      ? t('mt.needSearch', '尚无检索结果——先在「① 检索」检索')
+      : t('mt.needInfo', '尚无元数据——在「Info 提取」运行深度提取')}</p>`;
+    return;
+  }
+  if (row == null) row = Math.max(0, MT.editRow[which]);
+  try {
+    const d = await jfetch(`/api/meta/record?name=${encodeURIComponent(MT.project)}&which=${which}&row=${row}`);
+    MT.editRow[which] = d.row_index;
+    MT.recData[which] = d;
+    renderRecord(which, d);
+  } catch (e) {
+    box.innerHTML = `<p class="hint">✘ ${esc(e.message)}</p>`;
+  }
+}
+
+function renderRecord(which, d) {
+  const box = $(which === 'search' ? 'seBox' : 'ieBox');
+  const rec = d.row;
+  const cols = Object.keys(rec);
+  const run = rec.Run || rec.run || '';
+  const fieldsHtml = cols.map(col => {
+    const v = rec[col];
+    const miss = isNa(v);
+    const url = (!miss && LINK_COLS.has(col)) ? buildUrl(col, v) : null;
+    const aim = MT.aiMarks.has(`${which}:${d.row_index}:${col}`);
+    const cls = miss ? 'miss' : aim ? 'aimark' : '';
+    const input = `<input data-col="${esc(col)}" class="${cls}" value="${esc(miss ? '' : v)}"
+       placeholder="${miss ? t('mt.missingPh', '（缺失）') : ''}" style="width:100%">`;
+    return `<label>${esc(col)}${url
+      ? `${input}<a class="btn small" style="align-self:flex-start" href="${esc(url)}" target="_blank" rel="noopener">↗ Open</a>`
+      : input}</label>`;
+  }).join('');
+  box.innerHTML = `
+    <div class="edit-grid">
+      <div>
+        <div class="rec-nav">
+          <button class="btn small" onclick="recordNav('${which}',-1)">◀ Prev</button>
+          <span class="stat-line">${t('mt.rowN', '第 {i} / {n} 行')
+            .replace('{i}', d.row_index + 1).replace('{n}', d.total)}</span>
+          <button class="btn small" onclick="recordNav('${which}',1)">Next ▶</button>
+        </div>
+        <div class="rec-nav">
+          <input id="recJump_${which}" type="number" min="1" max="${d.total}" value="${d.row_index + 1}"
+                 style="width:80px" onkeydown="if(event.key==='Enter')recordJump('${which}')">
+          <button class="btn small" onclick="recordJump('${which}')">${t('mt.jump', '跳转')}</button>
+        </div>
+        <p class="stat-line"><b>Run:</b> <span class="mono">${esc(run)}</span><br>
+           <b>Species:</b> ${esc(rec.ScientificName || '—')}</p>
+        <div class="toolbar">
+          <button class="btn small primary" onclick="saveRecord('${which}', this)" data-i18n="mt.saveRow">💾 保存本行</button>
+          <button class="btn small" onclick="loadRecord('${which}')" data-i18n="c.reset">重置</button>
+        </div>
+        <p class="hint">🟡 ${t('mt.legendMiss', '黄底=缺失')} · 🟢 ${t('mt.legendAI', '绿底=AI 修改')} ·
+           ${t('mt.legendLink', '链接列在浏览页点击打开')}</p>
+      </div>
+      <div>
+        <div class="rec-form">${fieldsHtml}</div>
+        <div style="margin-top:10px">
+          <b class="stat-line">${t('mt.rawCache', '原始网页缓存（如有）')}</b>
+          <pre class="fileview" style="max-height:200px">${d.cache ? esc(JSON.stringify(d.cache, null, 2)) : '—'}</pre>
+        </div>
+      </div>
+    </div>`;
+}
+
+function recordNav(which, d) {
+  const nx = MT.editRow[which] + d;
+  if (nx < 0) return;
+  loadRecord(which, nx);
+}
+function recordJump(which) {
+  const v = Number(val('recJump_' + which));
+  if (v >= 1) loadRecord(which, v - 1);
+}
+async function saveRecord(which, btn) {
+  const d = MT.recData[which];
+  if (!d) return;
+  const box = $(which === 'search' ? 'seBox' : 'ieBox');
+  const data = {};
+  box.querySelectorAll('input[data-col]').forEach(inp => {
+    data[inp.dataset.col] = inp.value;
+  });
+  await withBtn(btn, async () => {
+    try {
+      const r = await jfetch('/api/meta/row', {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name: MT.project, which, row: d.row_index, data})});
+      toast(t('mt.saved', '✓ 已保存'), t('mt.savedN', '{n} 个字段已更新').replace('{n}', r.applied), {ttl: 3000});
+      loadView('local'); loadView(VIEW.sb.which === which ? 'sb' : 'ib');
+      loadRecord(which);
+    } catch (e) { alert(e.message); }
+  }, '💾 保存中…');
+}
+
+/* ── 缓存填充 / 删除行 / 导入导出 ── */
+async function fillCache(which, btn) {
+  await withBtn(btn, async () => {
+    try {
+      const r = await jfetch('/api/meta/fill_cache', {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name: MT.project, which})});
+      toast(t('mt.fillCache', '🧩 缓存填充'),
+        t('mt.filledN', '回填 {n} 个缺失值').replace('{n}', r.filled), {ttl: 5000});
+      if (r.filled) { loadView(which === 'search' ? 'sb' : 'ib'); loadView('local'); }
+    } catch (e) { alert(e.message); }
+  }, '⏳ 回填中…');
+}
+
+async function delRows(which) {
+  const rows = [...MT.sel[which]].map(Number);
+  if (!rows.length) { alert(t('mt.needSel', '请先勾选行')); return; }
+  if (!confirm(t('mt.delConfirm', '删除选中的 {n} 行？此操作可通过重新导入恢复。').replace('{n}', rows.length))) return;
+  try {
+    const r = await jfetch('/api/meta/rows/delete', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: MT.project, which, rows})});
+    MT.sel[which].clear();
+    toast(t('mt.delOk', '✓ 已删除'), t('mt.nowRows', '剩余 {n} 行').replace('{n}', r.total), {ttl: 4000});
+    await loadColls();
+    loadView(which === 'search' ? 'sb' : 'ib');
+    loadView('local');
+  } catch (e) { alert(e.message); }
+}
+
+function importClick(which) { MT.importWhich = which; $('importFile').click(); }
+async function doImport(inp) {
+  const f = inp.files[0];
+  if (!f || !MT.project) return;
+  const fd = new FormData();
+  fd.append('name', MT.project);
+  fd.append('which', MT.importWhich);
+  fd.append('file', f);
+  const btnToast = toast(t('mt.importing', '导入中…'), f.name, {ttl: 8000});
+  try {
+    const r = await fetch('/api/meta/import', {method: 'POST', body: fd});
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+    toast(t('mt.importOk', '✓ 导入完成'), `${d.rows} ${t('mt.rows', '行')}`, {ttl: 5000});
+    await loadColls();
+    MT.cols = {};
+    await Promise.all([loadView('local'), loadView('sb'), loadView('ib'),
+                       buildQColSelects(), buildLocalFilters()]);
+  } catch (e) { alert(t('mt.importFail', '导入失败') + ': ' + e.message); }
+  finally { inp.value = ''; }
+}
+
+function doExport(which, selId) {
+  const fmt = val(selId) || 'csv';
+  location.href = `/api/meta/export?name=${encodeURIComponent(MT.project)}&which=${which}&fmt=${fmt}`;
+}
+
+/* ── AI 补全缺失 ── */
+function aiFillOpen(which) {
+  MT.aiWhich = which;
+  $('aiWhichLabel').textContent =
+    (which === 'search' ? t('mt.storeS') : t('mt.storeI')) + ' · ' + MT.project;
+  $('aiProg').textContent = '';
+  $('aiModal').style.display = 'flex';
+}
+function aiModalClose() { $('aiModal').style.display = 'none'; }
+async function aiStopTask() {
+  const stopBtn = $('aiStop');
+  const tid = stopBtn && stopBtn.dataset.task;
+  if (!tid) return;
+  if (!confirm(t('mt.aiStopConfirm'))) return;
+  stopBtn.disabled = true;
+  try { await jfetch('/api/task/' + tid + '/cancel', {method: 'POST'}); } catch (e) {}
+  stopBtn.disabled = false;
+}
+
+async function aiFillStart() {
+  const btn = $('aiStart');
+  await withBtn(btn, async () => {
+    try {
+      const d = await jfetch('/api/meta/ai_fill', {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name: MT.project, which: MT.aiWhich, model: val('aiModel')})});
+      $('aiProg').textContent = t('mt.aiRunning', 'AI 清洗中…（{n} 条记录）').replace('{n}', d.records);
+      const stopBtn = $('aiStop');
+      stopBtn.style.display = '';
+      stopBtn.dataset.task = d.task;
+      pollLog(d.task, 'aiProg', async t2 => {
+        stopBtn.style.display = 'none';
+        if (t2.status === 'done') {
+          const cells = (t2.result && t2.result.stats && t2.result.stats.cells) || [];
+          cells.forEach(([r2, c]) => MT.aiMarks.add(`${MT.aiWhich}:${r2}:${c}`));
+          aiModalClose();
+          await loadColls();
+          loadView(MT.aiWhich === 'search' ? 'sb' : 'ib');
+          loadView('local');
+          toast('✨ AI ' + t('mt.aiDone', '补全完成'),
+            t('mt.aiChanged', 'AI 修改 {n} 个字段（绿底标记）').replace('{n}', cells.length), {ttl: 6000});
+        } else {
+          $('aiProg').textContent = '✘ ' + (t2.error || t2.status);
+        }
+      });
+    } catch (e) { $('aiProg').textContent = '✘ ' + e.message; }
+  }, '⏳ 启动中…');
+}
+
+/* ── AI 总结 ── */
+async function aiSummary(which, btn) {
+  await withBtn(btn, async () => {
+    try {
+      const d = await jfetch('/api/meta/ai_summary', {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name: MT.project, which})});
+      $('sumText').value = d.summary || '';
+      $('sumModal').style.display = 'flex';
+    } catch (e) { alert(e.message); }
+  }, '⏳ AI 生成中…');
+}
+function copySum() {
+  navigator.clipboard.writeText($('sumText').value)
+    .then(() => toast(t('c.copy', '复制'), t('mt.copied', '已复制到剪贴板'), {ttl: 2500}))
+    .catch(() => {});
+}
+
+/* ── 可视化（S-Viz / I-Viz，对应 GUI VisualizationPanel） ── */
+async function loadViz(which, force) {
+  const box = $(which === 'search' ? 'svCharts' : 'ivCharts');
+  const sumBox = $(which === 'search' ? 'svSummary' : 'ivSummary');
+  const fieldSel = $(which === 'search' ? 'svField' : 'ivField');
+  if (!MT.project || !(MT.cols[which] || []).length) {
+    if (sumBox) sumBox.innerHTML = '';   // 清掉上一轮摘要，避免残留
+    box.innerHTML = `<p class="hint">${which === 'search'
+      ? t('mt.needSearch', '尚无检索结果——先在「① 检索」检索')
+      : t('mt.needInfo', '尚无元数据——在「Info 提取」运行深度提取')}</p>`;
+    return;
+  }
+  box.innerHTML = `<p class="hint">${t('c.loading', '加载中…')}</p>`;
+  try {
+    const d = await jfetch(`/api/meta/overview?name=${encodeURIComponent(MT.project)}&which=${which}`);
+    const cols = d.columns;
+    const cur = MT.vizField[which] && cols.includes(MT.vizField[which])
+      ? MT.vizField[which] : (cols.includes('Tissue') ? 'Tissue' : cols[0]);
+    fieldSel.innerHTML = cols.map(c => `<option value="${esc(c)}" ${c === cur ? 'selected' : ''}>${esc(c)}</option>`).join('');
+    MT.vizField[which] = cur;
+
+    const frag = [];
+    // 1) 选中字段 + 标准字段条形图（两列布局）
+    const std = ['ScientificName', 'Tissue', 'Source', 'LibrarySource', 'Location', 'Database']
+      .filter(c => cols.includes(c) && c !== cur).slice(0, 4);
+    const barCols = [cur, ...std];
+    frag.push(`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:4px">`);
+    barCols.forEach((c, i) => {
+      frag.push(`<div class="chart-box"><div class="chart-head"><b>${esc(c)} ${t('mt.dist', '分布')}</b>
+        <span style="flex:1"></span><button class="btn small" onclick="saveChart('bar_${which}_${i}','${esc(c)}')">⬇ PNG</button></div>
+        <div id="bar_${which}_${i}" style="height:${Math.max(240, Math.min(d.fields[c].counts.length, 20) * 24 + 70)}px"></div></div>`);
+    });
+    frag.push(`</div>`);
+    // 2) 缺失热图
+    frag.push(`<div class="chart-box"><div class="chart-head"><b>${t('mt.missingH', '缺失数据概览（%）')}</b>
+      <span style="flex:1"></span><button class="btn small" onclick="saveChart('heat_${which}','Missing')">⬇ PNG</button></div>
+      <div id="heat_${which}" style="height:300px"></div></div>`);    // 3) 时间线
+    if (d.years.length) {
+      frag.push(`<div class="chart-box"><div class="chart-head"><b>${t('mt.timeline', '采样 / 发布时间线')}（${esc(d.date_col || '')}）</b>
+        <span style="flex:1"></span><button class="btn small" onclick="saveChart('time_${which}','Timeline')">⬇ PNG</button></div>
+        <div id="time_${which}" style="height:300px"></div></div>`);
+    }
+    // 数据摘要：提到面板顶部当总览条（不再挤在图表流里）
+    const s = d.summary;
+    const sumBox = $(which === 'search' ? 'svSummary' : 'ivSummary');
+    if (sumBox) {
+      const pct = (s.filled / Math.max(1, s.total * s.cols) * 100).toFixed(1);
+      const cpct = (s.complete / Math.max(1, s.total) * 100).toFixed(1);
+      sumBox.innerHTML = `<div class="stat-line" style="margin:2px 0 10px">
+        <b>${t('mt.summary', '数据摘要')}</b> ·
+        ${t('mt.sumLine', '共 {total} 条记录 · 字段 {cols} · 已填 {filled}（{pct}%） · 缺失 {miss} · 完整记录 {complete}（{cpct}%）')
+          .replace('{total}', s.total.toLocaleString()).replace('{cols}', s.cols)
+          .replace('{filled}', s.filled.toLocaleString())
+          .replace('{pct}', pct)
+          .replace('{miss}', s.missing.toLocaleString())
+          .replace('{complete}', s.complete.toLocaleString())
+          .replace('{cpct}', cpct)}
+        ${s.total_gb ? ` · ${t('mt.vol', '数据量')}: ${s.total_gb} GB（${s.gb_runs} runs）` : ''}</div>`;
+    }
+
+    box.innerHTML = frag.join('');
+    // 画图
+    barCols.forEach((c, i) => drawBar(`bar_${which}_${i}`, c, d.fields[c].counts));
+    drawHeat(`heat_${which}`, cols, d.fields, d.summary.total);
+    if (d.years.length) drawTimeline(`time_${which}`, d.years, d.date_col);
+  } catch (e) {
+    box.innerHTML = `<p class="hint">✘ ${esc(e.message)}</p>`;
+  }
+}
+
+function drawBar(divId, col, counts) {
+  const top = counts.slice(0, 20).reverse();
+  const el = $(divId);
+  if (!el || !top.length) { if (el) el.innerHTML = `<p class="hint">${t('c.noData', '暂无数据')}</p>`; return; }
+  Plotly.react(el, [{
+    type: 'bar', orientation: 'h',
+    x: top.map(x => x[1]), y: top.map(x => x[0]),
+    marker: {color: '#4C72B0'}, text: top.map(x => x[1]), textposition: 'auto',
+  }], {
+    margin: {l: 190, r: 20, t: 14, b: 36}, height: Math.max(220, top.length * 24 + 60),
+    xaxis: {title: {text: 'Count', font: {size: 11}}},
+    font: {size: 10},
+  }, {displayModeBar: false, responsive: true});
+}
+
+function drawHeat(divId, cols, fields, total) {
+  const el = $(divId);
+  if (!el) return;
+  const pct = c => {
+    const f = fields[c] || {missing: 0};
+    return Math.round(f.missing / Math.max(1, total) * 1000) / 10;
+  };
+  Plotly.react(el, [{
+    type: 'heatmap',
+    z: [cols.map(pct)],
+    x: cols, y: [t('mt.missPct', '缺失 %')],
+    colorscale: 'RdYlGn', reversescale: true, zmin: 0, zmax: 100,
+    hovertemplate: '%{x}: %{z}%<extra></extra>',
+  }], {
+    margin: {l: 60, r: 10, t: 10, b: 130}, height: 280, font: {size: 10},
+  }, {displayModeBar: false, responsive: true});
+}
+
+function drawTimeline(divId, years, dateCol) {
+  const el = $(divId);
+  if (!el) return;
+  Plotly.react(el, [{
+    type: 'bar', x: years.map(y => y[0]), y: years.map(y => y[1]),
+    marker: {color: '#55A868'}, text: years.map(y => y[1]), textposition: 'auto',
+  }], {
+    margin: {l: 50, r: 20, t: 10, b: 40}, height: 280,
+    xaxis: {title: {text: 'Year', font: {size: 11}}},
+    yaxis: {title: {text: 'Records', font: {size: 11}}},
+    font: {size: 10},
+  }, {displayModeBar: false, responsive: true});
+}
+
+function saveChart(divId, name) {
+  const el = $(divId);
+  if (!el) return;
+  const safe = String(name).replace(/[^\w.-]+/g, '_');
+  Plotly.downloadImage(el, {format: 'png', scale: 2, filename: safe,
+    width: Math.max(800, el.clientWidth), height: el.clientHeight || 300});
+}
+
+/* ── SCI 全景图（引擎出图 + 画廊） ── */
+let _plotWatch = null;
+async function metaPlot(btn) {
+  if (!MT.project) return;
+  try {
+    const r = await fetch('/api/meta/plot', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: MT.project})});
+    if (!r.ok) { alert((await r.json()).error || t('mt.startFail')); return; }
+    const d = await r.json();
+    toast(t('mt.plotStarted', '绘图任务已启动'), d.task, {ttl: 3000});
+    refreshTasks();
+    _plotWatch = {task: d.task};
+    pollLog(d.task, whichSciLog(), null);
+    watchTaskBtn(d.task, btn, '⏳ 绘图中…', t2 => {
+      _plotWatch = null;
+      if (t2.status === 'done') { loadSciGallery(); loadColls(); }
+    }, {cancelable: true});
+  } catch (e) { alert('无法连接平台服务: ' + e); }
+}
+function whichSciLog() {
+  // 日志盒子放在对应图表面板下（不存在则临时挂到当前可见面板）
+  const active = document.querySelector('.mt-sec:not([style*="none"])');
+  if (!active) return 'svCharts';
+  let el = active.querySelector('.sci-log');
+  if (!el) {
+    el = document.createElement('div');
+    el.className = 'search-log sci-log';
+    active.querySelector('.card').appendChild(el);
+  }
+  el.id = el.id || ('sciLog_' + Math.random().toString(36).slice(2, 7));
+  return el.id;
+}
+
+async function loadSciGallery() {
+  for (const [which, boxId] of [['search', 'svSci'], ['core14', 'ivSci']]) {
+    const panel = $(boxId);
+    if (!panel || !MT.project) continue;
+    try {
+      const d = await jfetch(`/api/meta/plot/files?name=${encodeURIComponent(MT.project)}`);
+      if (!d.files.length) { panel.innerHTML = ''; continue; }
+      const pngs = d.files.filter(f => f.name.endsWith('.png'));
+      const pdfs = d.files.filter(f => f.name.endsWith('.pdf'));
+      const figTitle = f => { const k = PLOT_TITLES[f.name.replace(/\.(png|pdf)$/, '')]; return k ? t(k) : f.name; };
+      panel.innerHTML = `<div class="chart-box" style="margin-bottom:10px">
+        <div class="chart-head"><b>📊 ${t('mt.plotPanel', '数据全景图')}</b>
+        <span style="flex:1"></span>
+        <span class="hint" style="margin:0">${t('mt.plotSub', '已生成的 SCI 成图')}</span></div>
+        <div class="fig-grid">` +
+        pngs.map(f => `<div class="fig-item">
+          <a href="${f.url}" target="_blank" title="${esc(t('mt.viewImg'))}"><img src="${f.url}" loading="lazy" alt="${esc(f.name)}"></a>
+          <p class="hint">${esc(figTitle(f))} · ${esc(f.size)} · <a href="${f.url}" download>${t('mt.dlImg')}</a></p>
+        </div>`).join('') + `</div>` +
+        (pdfs.length ? `<p class="hint" style="margin:8px 0 0">PDF：` +
+          pdfs.map(f => `<a class="btn small" style="margin:2px" href="${f.url}" download>📄 ${esc(figTitle(f))}</a>`).join('') + `</p>` : '') +
+        `</div>`;
+    } catch (e) { panel.innerHTML = ''; }
+  }
+}
+
+/* ── 初始化 ── */
+(function init() {
+  const params = new URLSearchParams(location.search);
+  const wantP = params.get('p') || '';
+  const hash = (location.hash || '').replace('#', '');
+  (async () => {
+    await loadColls();
+    const pick = MT.colls.find(c => c.name === wantP) || MT.colls[0];
+    if (pick) await setProject(pick.name);
+    loadSciGallery();
+    mtShow(MT_SECS.includes(hash) ? hash : 'search');
+  })();
+})();
+</script>
+</body>
+</html>

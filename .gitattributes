@@ -1,0 +1,13 @@
+# 换行符策略：禁用一切自动转换，仓库内容与磁盘逐字节一致。
+#
+# 背景：本平台源码混合 LF / CRLF（38 个已纳管文件为 CRLF，如 vp/viz.py、
+# vp/pipeline.py、docs/bioaider_ref_src/*.py），而本机存在系统级
+# core.autocrlf=true，会在 git add 时把 CRLF 规范化成 LF，造成：
+#   ① index 与工作区不一致（stat 缓存掩盖，编辑后才暴露整文件 diff）；
+#   ② 每次改动都产生上千行噪声 diff，破坏代码审查与回溯。
+#
+# 选择 -text（不做任何转换）而非 text=auto 的理由：
+#   - 平台数据文件（FASTA/FASTQ）由 safe_open 强制 LF 写出，与 git 无关；
+#   - 源码换行符对运行无影响，保真比统一更重要；
+#   - 避免 clone 到不同平台后行尾被静默改写。
+* -text

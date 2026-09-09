@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>数据库构建 - 植物病毒分析平台</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="vp-lang" content="{{ lang }}">
+<script>try{if(localStorage.getItem("vp_theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
+<link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
+<style>h2[id]{scroll-margin-top:60px}</style>
+</head>
+<body>
+{% include "_nav.html" %}
+
+<div class="page">
+  <div class="tools-layout group-layout">
+    {% include "_group_nav.html" %}
+    <main class="group-main">
+  <div class="layout">
+    <div class="col">
+      <div class="card">
+        <h2 id="m-taxonomy" data-i18n="bd.taxonomy">0️⃣ NCBI Taxonomy（首次必做）</h2>
+        <p class="hint" data-i18n="bd.taxHint">kunpeng 建库需要 nodes.dmp/names.dmp。下载约 57MB，一次构建、两个库共用。</p>
+        <div id="taxStat" class="dbbadge"></div>
+        <p class="hint" style="margin:4px 0">📁 <span data-i18n="bd.loc">位置</span>: databases/tax/core/</p>
+        <button class="btn primary" onclick="buildTaxonomy(this)" data-i18n="bd.taxBtn">⬇ 下载 / 准备 Taxonomy</button>
+        <div style="margin-top:12px;border-top:1px dashed var(--line-100);padding-top:10px">
+          <label data-i18n="bd.taxDirLbl">已有 Taxonomy 目录（含 nodes.dmp / names.dmp）</label>
+          <div class="filerow">
+            <input id="taxDir" type="text" data-i18n-ph="bd.taxDirPh" placeholder="databases/tax/core 或本机任意目录">
+            <button class="btn small" onclick="browseDir('taxDir')">📁</button>
+          </div>
+          <button class="btn" onclick="loadTaxonomy(this)" data-i18n="bd.taxLoadBtn">📂 加载已有 Taxonomy</button>
+        </div>
+        <div class="buildrun" id="buildrun-taxonomy"></div>
+      </div>
+
+      <div class="card">
+        <h2 id="m-host" data-i18n="bd.host">1️⃣ 宿主数据库（kunpeng）</h2>
+        <div id="hostStat" class="dbbadge"></div>
+        <p class="hint" style="margin:4px 0">📁 <span data-i18n="bd.loc">位置</span>: <span id="hostPath">databases/host/classify/</span></p>
+        <label data-i18n="bd.hostGenome">宿主基因组 FASTA</label>
+        <div class="filerow">
+          <input id="hostGenome" type="text" class="file-input" value="host-db/112863_Lycium_barbarum/genome.fa">
+          <button class="btn small" onclick="browse('hostGenome')">📁</button>
+        </div>
+        <div class="grid2">
+          <div><label data-i18n="bd.hostTaxid">宿主物种 NCBI TaxID</label>
+            <input id="hostTaxid" type="number" data-i18n-ph="bd.taxidPh"
+                   placeholder="如 4081(烟草) 112863(枸杞)"></div>
+          <div><label data-i18n="bd.cap">hash 容量</label><input id="hostCap" type="text" value="256M"></div>
+          <div><label data-i18n="bd.hostThreads">线程（内存不足可降至 4）</label><input id="hostThreads" type="number" value="8"></div>        </div>
+        <label class="chk"><input type="checkbox" id="hostRebuild"><span data-i18n="bd.rebuild"> 重建（忽略已有库）</span></label>
+        <label class="chk"><input type="checkbox" id="hostCleanMid"><span data-i18n="bd.cleanMid"> 构建后清理中间文件（library/prep，可省数 GB 空间）</span></label>
+        <button class="btn primary" onclick="buildHostDb(this)" data-i18n="bd.hostBtn">🧬 构建宿主库</button>
+        <p class="hint" data-i18n="bd.hostHint">1.8GB 植物基因组切片建库约 1-2 分钟（2GB 内存即可）；
+        平台自动切片处理大染色体并自动校验 TaxID。</p>
+        <details style="margin-top:8px">
+          <summary data-i18n="bd.seqName">⚙ kunpeng 对序列名的硬要求（源码级，缺 taxid 直接中止建库）</summary>
+          <p class="hint" style="margin-top:8px" data-i18n="bd.seqNameHint">FASTA 头必须形如 <code>&gt;taxid|12345|任意seqid 可选描述</code>：taxid 段须落在第一个空格之前，键名必须是小写 taxid（kraken:taxid 亦可，TAXID 不认），值必须是纯数字。也可用 <code>&gt;seqid|taxid|12345</code> 或 <code>&gt;seqid|kraken:taxid|12345</code>。只要头里带 taxid，就无需另备 seqid2taxid 映射表，kunpeng 会自行生成。</p>
+        </details>
+        <div style="margin-top:12px;border-top:1px dashed var(--line-100);padding-top:10px">
+          <label data-i18n="bd.hostDirLbl">已构建宿主库目录（kunpeng，含 hash_*.k2d）</label>
+          <div class="filerow">
+            <input id="hostDbDir" type="text" data-i18n-ph="bd.hostDbDirPh" placeholder="databases/host/classify 或本机目录">
+            <button class="btn small" onclick="browseDir('hostDbDir')">📁</button>
+          </div>
+          <button class="btn" onclick="loadHostDb(this)" data-i18n="bd.hostLoadBtn">📂 加载已构建宿主库</button>
+        </div>
+        <div class="buildrun" id="buildrun-host"></div>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="bd.virusLibs">🦠 病毒分类库（自备预构建）</h2>
+        <p class="hint" data-i18n="bd.virusLibsHint">病毒 kunpeng 分类库由使用者预构建提供：
+           把库目录放入 <b>databases/</b> 下即被自动识别（下方实时列出）；
+           平台外的库用「登记外部病毒库」挂载。分析时在
+           「分析工具 → ②病毒鉴定 / ④contig 分类」的病毒库下拉中选择。</p>
+        <div id="virusLibList" class="dbbadge"></div>
+        <div style="margin-top:12px;border-top:1px dashed var(--line-100);padding-top:10px">
+          <label data-i18n="bd.regLibLbl">外部 kunpeng 病毒库目录（平台外也可，只读使用）</label>
+          <div class="filerow">
+            <input id="extLibDir" type="text" data-i18n-ph="bd.extLibDirPh" placeholder="如 D:\refs\my_virus_db">
+            <button class="btn small" onclick="browseDir('extLibDir')">📁</button>
+          </div>
+          <button class="btn" onclick="registerVirusLib(this)" data-i18n="bd.regLibBtn">📂 登记外部病毒库</button>
+        </div>
+        <details style="margin-top:12px">
+          <summary data-i18n="bd.advBuild">🛠 高级：在线构建 / 转换（一般不用）</summary>
+          <p class="hint" style="margin-top:8px" data-i18n="bd.advBuildHint">仅当需要从原始参考数据重建库时使用：
+             NCBI RefSeq Viral（~1.9 万条，快）· RVDB C-RVDB（~132 万条，耗时与内存显著更高）·
+             Kraken2 官方库包（.tar.gz）转换。</p>
+          <div style="margin:8px 0;padding:8px 10px;border-left:3px solid var(--line-100);background:var(--bg-soft,rgba(127,127,127,.06));border-radius:4px">
+            <b data-i18n="bd.advSeqName">自备 FASTA 的规范序列名</b>
+            <p class="hint" style="margin:4px 0 0" data-i18n="bd.advSeqNameHint">手工提供参考序列时，按 <code>&gt;taxid|12345|seqid 描述</code> 命名即可，无需提供映射表。平台内建的 RefSeq/RVDB 流程已自动注入 taxid。</p>
+          </div>
+          <p class="hint" style="margin:4px 0">📁 <span data-i18n="bd.loc">位置</span>:
+             RefSeq → databases/virus/ref/ · RVDB → databases/virus/rvdb/ ·
+             Kraken2 转换 → databases/&lt;库名&gt;/（原始参考数据 virus_ref 已移除）</p>
+          <div style="display:flex;gap:10px;margin:8px 0;flex-wrap:wrap">
+            <button class="btn" onclick="buildUniversalDb('refvirus', this)"
+                    title="NCBI RefSeq Viral（速度快）" data-i18n-title="bd.refseqTitle">
+              🧬 构建 RefSeq 病毒库</button>
+            <button class="btn" onclick="buildUniversalDb('rvdb', this)"
+                    title="RVDB C-RVDB（大库，耗时长）" data-i18n-title="bd.rvdbTitle">
+              🧬 构建 RVDB 库</button>
+          </div>
+          <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;align-items:end">
+            <div class="gp-item">
+              <label data-i18n="bd.k2Lbl">Kraken2 库包路径（.tar.gz，官方预构建库）</label>
+              <div class="filerow">
+                <input id="k2Tar" type="text" value="databases/k2_viral_20260626.tar.gz">
+                <button class="btn small" onclick="browse('k2Tar')">📁</button>
+              </div>
+            </div>
+            <div class="gp-item">
+              <label data-i18n="bd.k2Cap">hash capacity</label>
+              <input id="k2Cap" type="text" value="1G" style="width:80px">
+            </div>
+            <button class="btn" onclick="convertKraken2(this)"
+                    title="kunpeng hashshard：Kraken2 索引一次性转为 kunpeng 分片库" data-i18n-title="bd.k2ConvTitle">
+              🔄 从 Kraken2 库转换</button>
+          </div>
+          <div id="k2Stat" class="dbbadge" style="margin-top:6px"></div>
+          <div class="buildrun" id="buildrun-refvirus"></div>
+          <div class="buildrun" id="buildrun-rvdb"></div>
+          <div class="buildrun" id="buildrun-k2"></div>
+        </details>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="bd.kvTitle">🧱 病毒鉴定库（salmon / minibwa 比对索引）</h2>
+        <p class="hint" data-i18n="bd.kvHint">给「已知病毒识别与定量」模块用的比对索引。建好的库落在
+           <b>virus-db/&lt;库名&gt;/</b>，库名 <code>kv_index</code> 就是平台默认库
+           （配合 <code>virus-db/final.cluster.ref.fasta</code> 自动复用，省掉每次重建索引）。
+           单基因组/自定义参考也能在这里临时建库，再到工具卡里把参考指过来即可。<br>
+           与上方「病毒分类库」（kunpeng）无关，两者互不影响。</p>
+
+        <label data-i18n="bd.kvFastaLbl">参考序列 FASTA（平台内外均可，只读）</label>
+        <div class="filerow">
+          <input id="kvidxFasta" type="text" data-i18n-ph="bd.kvFastaPh"
+                 placeholder="留空则用 virus-db/final.cluster.ref.fasta">
+          <button class="btn small" onclick="browse('kvidxFasta')">📁</button>
+        </div>
+
+        <div class="grid2" style="margin-top:10px">
+          <div><label data-i18n="bd.kvNameLbl">库名（字母数字-_）</label>
+            <input id="kvidxName" type="text" value="kv_index"></div>
+          <div><label data-i18n="bd.kvThreadsLbl">线程</label>
+            <input id="kvidxThreads" type="number" value="8"></div>
+        </div>
+
+        <label style="margin-top:10px" data-i18n="bd.kvEnginesLbl">建哪些引擎的索引</label>
+        <label class="chk"><input type="checkbox" id="kvidxMinibwa" checked>
+          <span data-i18n="bd.kvMinibwa"> minibwa（真比对，鉴定/共识/变异默认用它）</span></label>
+        <label class="chk"><input type="checkbox" id="kvidxSalmon">
+          <span data-i18n="bd.kvSalmon"> salmon（伪比对，定量为主，不支持共识）</span></label>
+
+        <label class="chk" style="margin-top:8px"><input type="checkbox" id="kvidxOverwrite">
+          <span data-i18n="bd.kvOverwrite"> 允许覆盖同名库（引擎内部已有索引会自动复用，一般不用勾）</span></label>
+
+        <button class="btn primary" onclick="buildKvIndex(this)" data-i18n="bd.kvBuildBtn">🧱 构建鉴定库</button>
+        <div class="buildrun" id="buildrun-kvidx"></div>
+
+        <div style="margin-top:12px;border-top:1px dashed var(--line-100);padding-top:10px">
+          <label data-i18n="bd.kvDirLbl">已有鉴定库目录（平台外也可，只读使用）</label>
+          <div class="filerow">
+            <input id="kvIdxDir" type="text" data-i18n-ph="bd.kvDirPh" placeholder="如 D:\refs\my_kv_index">
+            <button class="btn small" onclick="browseDir('kvIdxDir')">📁</button>
+          </div>
+          <button class="btn" onclick="registerKvIndex(this)" data-i18n="bd.kvLoadBtn">📂 加载已有鉴定库</button>
+        </div>
+
+        <div style="margin-top:12px;border-top:1px dashed var(--line-100);padding-top:10px">
+          <label data-i18n="bd.kvListLbl">已建鉴定库</label> <button class="btn small" onclick="loadKvIndexList()" title="刷新列表" data-i18n-title="bd.refreshList">🔄</button>
+          <div id="kvIdxList" class="dbbadge"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+    </main>
+  </div>
+</div>
+
+<div id="dlgMask" class="dlgmask" style="display:none">
+  <div class="dlg">
+    <div class="dlghead"><span id="dlgTitle" data-i18n="c.chooseFile">选择文件</span> <button class="btn small" onclick="closeDlg()">✕</button></div>
+    <div id="dlgPath" class="dlgpath"></div>
+    <div class="dlglist" id="dlgList"></div>
+    <div id="dlgPickDir" style="display:none;padding:10px 16px;border-top:1px solid var(--line-100);text-align:right">
+      <button class="btn small primary" onclick="pickDir()" data-i18n="c.pickDir">选择此目录 ✔</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/i18n.js?v={{ asset_v }}"></script>
+<script src="/static/app.js?v={{ asset_v }}"></script>
+<script>
+/* Kraken2 库转换（kunpeng hashshard） */
+async function convertKraken2(btn) {
+  const tar = val('k2Tar');
+  if (!tar) { alert(t('bd.needK2Tar','请填写 Kraken2 库包路径')); return; }
+  try {
+    const r = await fetch('/api/convert_kraken2', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tar, name: 'k2viral_db',
+                             hash_capacity: val('k2Cap') || '1G' })});
+    if (!r.ok) { alert(t('bd.startFail','启动失败: ') + ((await r.json()).error || '')); return; }
+    const d = await r.json();
+    taskLogOpen.add(d.task);
+    startPolling();
+    watchTaskBtn(d.task, btn, t('bd.converting','⏳ 转换中…'), () => loadDbs());
+  } catch (e) { alert(t('bd.connFail','无法连接平台服务: ') + e); }
+}
+
+/* 通用病毒库构建 */
+async function buildUniversalDb(source, btn) {
+  if (source === 'rvdb' && !confirm(
+      t('bd.rvdbConfirm','RVDB 库约 132 万条序列，构建耗时长、内存占用高，确定继续？'))) return;
+  try {
+    const r = await fetch('/api/build_universal_db', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source })});
+    if (!r.ok) { alert(t('bd.startFail','启动失败: ') + ((await r.json()).error || '')); return; }
+    const d = await r.json();
+    taskLogOpen.add(d.task);
+    startPolling();
+    watchTaskBtn(d.task, btn, t('bd.building','⏳ 建库中…'), () => loadDbs());
+  } catch (e) { alert(t('bd.connFail','无法连接平台服务: ') + e); }
+}
+/* 病毒分类库列表：自备预构建库（databases/ 下自动探测 + 外部登记），目录名 → 展示名 */
+const VIRUS_LIB_LABELS = {
+  'virus/plant': t('bd.libPlant','植物病毒库（主库）'),
+  'virus/ref':   t('bd.libRefseq','RefSeq Viral 全病毒库'),
+  'virus/rvdb':  t('bd.libRvdb','RVDB 病毒库'),
+  // 兼容旧目录名（外部登记或未迁移的自备库）
+  virus_db:    t('bd.libPlant','植物病毒库（主库）'),
+  plant_db:    t('bd.libPlantSelf','Plant 病毒库（自备）'),
+  refvirus_db: t('bd.libRefseq','RefSeq Viral 全病毒库'),
+  rvdb_db:     t('bd.libRvdb','RVDB 病毒库'),
+  k2viral_db:  t('bd.libK2','Kraken2 Viral 转换库'),
+};
+let VIRUS_LIBS = [];
+
+/* 通用库状态徽章（附加到 loadDbs 之后） */
+const _origLoadDbs = loadDbs;
+loadDbs = async function() {
+  await _origLoadDbs();
+  try {
+    const d = await (await fetch('/api/dbs')).json();
+    const badge = (ok, label) =>
+      `<span class="badge ${ok ? 'ok' : 'no'}">${label} ${ok ? '✔' : '✘'}</span>`;
+    if ($('hostPath') && d.host) $('hostPath').textContent = d.host.path;
+    const list = $('virusLibList');
+    if (list) {
+      VIRUS_LIBS = d.virus_libs || [];
+      list.innerHTML = VIRUS_LIBS.map((l, i) => {
+        const ext = l.external ? ` <span class="badge">${t('bd.external','外部')}</span>` : '';
+        const rm = l.external
+          ? ` <button class="btn small" onclick="unregisterLib(${i})">${t('bd.remove','移除')}</button>` : '';
+        return `<div style="margin:4px 0">` +
+          badge(true, esc(VIRUS_LIB_LABELS[l.name] || l.name)) + ext +
+          `<span class="hint" style="margin-left:8px">${esc(l.path)}</span>${rm}</div>`;
+      }).join('') ||
+        '<p class="hint">' + t('bd.noVirusLib','（databases/ 下暂无就绪的 kunpeng 病毒库，把库目录放入后刷新）') + '</p>';
+    }
+    if ($('k2Stat')) $('k2Stat').innerHTML =
+      badge(!!(d.k2viral && d.k2viral.ready), 'Kraken2 转换库 (k2viral)');
+  } catch (e) {}
+};
+
+/* ---- 加载已构建 / 登记外部库（同步快操作，无任务） ---- */
+async function _postJson(url, body, btn) {
+  const old = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = t('bd.processing','⏳ 处理中…'); }
+  try {
+    const r = await fetch(url, { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      alert(r.status === 404
+        ? t('bd.api404','接口不存在（HTTP 404）——平台服务可能是旧版本，请重启平台并刷新本页后重试。')
+          + (d.error ? '\n' + d.error : '')
+        : (d.error || t('bd.opFail','操作失败 (HTTP {code})').replace('{code}', r.status)));
+      return null;
+    }
+    return d;
+  } catch (e) { alert(t('bd.connFail','无法连接平台服务: ') + e); return null; }
+  finally { if (btn) { btn.disabled = false; btn.textContent = old; } }
+}
+
+async function loadTaxonomy(btn) {
+  const dir = val('taxDir');
+  if (!dir) { alert(t('bd.needTaxDir','请填写已有 Taxonomy 目录')); return; }
+  const d = await _postJson('/api/load_taxonomy', { dir }, btn);
+  if (d) toast(t('bd.taxLoaded','✔ Taxonomy 已加载（{n} 个文件）→ {dir}')
+      .replace('{n}', (d.copied || []).length).replace('{dir}', d.dir), '', {ttl: 5000});
+}
+
+async function loadHostDb(btn) {
+  const dir = val('hostDbDir');
+  if (!dir) { alert(t('bd.needHostDir','请填写已构建宿主库目录')); return; }
+  const d = await _postJson('/api/load_host_db', { dir }, btn);
+  if (d) { toast(t('bd.hostLoaded','✔ 宿主库已加载: ') + d.path, '', {ttl: 5000}); loadDbs(); }
+}
+
+async function registerVirusLib(btn) {
+  const dir = val('extLibDir');
+  if (!dir) { alert(t('bd.needExtLib','请填写外部病毒库目录')); return; }
+  const d = await _postJson('/api/register_virus_lib', { dir }, btn);
+  if (d) { $('extLibDir').value = ''; toast(t('bd.extLibOk','✔ 外部病毒库已登记，工具②/④下拉即可选择'), '', {ttl: 5000}); loadDbs(); }
+}
+
+async function unregisterLib(i) {
+  const lib = VIRUS_LIBS[i];
+  if (!lib || !confirm(t('bd.rmLibConfirm','移除登记的外部病毒库？\n') + lib.path)) return;
+  await _postJson('/api/register_virus_lib', { dir: lib.path, remove: true });
+  loadDbs();
+}
+
+/* ══ 病毒鉴定库（salmon / minibwa 索引）══ */
+let KV_INDEX_LIBS = [];
+
+async function registerKvIndex(btn) {
+  const dir = val('kvIdxDir');
+  if (!dir) { alert(t('bd.needKvDir','请填写已有鉴定库目录')); return; }
+  const d = await _postJson('/api/kv_index_register', { dir }, btn);
+  if (d) {
+    $('kvIdxDir').value = '';
+    toast(t('bd.kvLoaded','✔ 鉴定库已加载，工具卡「鉴定库」下拉可选'), '', {ttl: 5000});
+    loadKvIndexList();
+  }
+}
+
+async function unregisterKvIndex(i) {
+  const lib = KV_INDEX_LIBS[i];
+  if (!lib || !confirm(t('bd.rmKvConfirm','从列表移除该鉴定库？\n') + lib.path + t('bd.rmKvNote','\n（只解除登记，不删除文件）'))) return;
+  await _postJson('/api/kv_index_register', { dir: lib.path, remove: true });
+  loadKvIndexList();
+}
+
+async function buildKvIndex(btn) {
+  const fasta = val('kvidxFasta');
+  const engines = [];
+  if ($('kvidxMinibwa') && $('kvidxMinibwa').checked) engines.push('minibwa');
+  if ($('kvidxSalmon') && $('kvidxSalmon').checked) engines.push('salmon');
+  if (!engines.length) { alert(t('bd.needEngine','至少勾选一个引擎')); return; }
+  const name = val('kvidxName') || 'kv_index';
+  if (!fasta && name === 'kv_index' && !confirm(
+      t('bd.kvDefaultConfirm','未指定参考 FASTA，将用平台默认 virus-db/final.cluster.ref.fasta（约 31 MB）建库。继续？'))) return;
+  try {
+    const r = await fetch('/api/build_kv_index', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fasta, engines, name,
+                             threads: parseInt(val('kvidxThreads'), 10) || 8 })});
+      if (!r.ok) { alert(t('bd.startFail','启动失败: ') + ((await r.json()).error || '')); return; }
+    const d = await r.json();
+    taskLogOpen.add(d.task);
+    startPolling();
+    watchTaskBtn(d.task, btn, t('bd.building','⏳ 建库中…'), () => loadKvIndexList());
+  } catch (e) { alert(t('bd.connFail','无法连接平台服务: ') + e); }
+}
+
+async function loadKvIndexList() {
+  const box = $('kvIdxList');
+  if (!box) return;
+  try {
+    const d = await (await fetch('/api/kv_index_list')).json();
+    const badge = (ok, label) =>
+      `<span class="badge ${ok ? 'ok' : 'no'}">${label} ${ok ? '✔' : '✘'}</span>`;
+    const engs = d.engines || {};
+    const engLine = ['minibwa', 'salmon'].map(e => {
+      const st = engs[e] || {};
+      return badge(!!st.available, e) +
+        `<span class="hint" style="margin:0 10px 0 6px">${esc(st.path || t('bd.notFound','未找到'))}</span>`;
+    }).join('');
+    KV_INDEX_LIBS = d.libs || [];
+    const libs = KV_INDEX_LIBS.map((l, i) => {
+      const mf = l.manifest || {};
+      const ref = mf.reference ? String(mf.reference).split(/[\\/]/).pop() : '';
+      const when = mf.built_at ? esc(mf.built_at) : '';
+      const extra = (ref || when)
+        ? `<span class="hint" style="margin-left:8px">${esc(ref)}${ref && when ? ' · ' : ''}${when}</span>`
+        : '';
+      // 外部登记的库提供移除按钮（平台内库只能删目录，不给 UI 删文件）
+      const rm = l.external
+        ? `<button class="btn small" style="margin-left:8px" onclick="unregisterKvIndex(${i})" title="${t('bd.rmFromList','从列表移除（不删文件）')}" data-i18n-title="bd.rmFromList">✕</button>`
+        : '';
+      const tag = l.external
+        ? `<span class="hint" style="margin-left:6px">${t('bd.external','外部')}</span>` : '';
+      return `<div style="margin:4px 0">${badge(true, esc(l.name))} ` +
+        badge(!!l.minibwa, 'minibwa') + ' ' + badge(!!l.salmon, 'salmon') +
+        tag + extra +
+        `<span class="hint" style="margin-left:8px">${esc(l.path)}</span>` + rm + '</div>';
+    }).join('') || '<p class="hint">' + t('bd.noKvLib','（virus-db/ 下暂无鉴定库）') + '</p>';
+    box.innerHTML = `<div style="margin-bottom:6px">${engLine}</div>` + libs;
+  } catch (e) {}
+}
+
+loadDbs(); loadKvIndexList(); startPolling();</script>
+</body>
+</html>

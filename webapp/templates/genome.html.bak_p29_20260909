@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>基因组图谱 - 植物病毒分析平台</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="vp-lang" content="{{ lang }}">
+<script>try{if(localStorage.getItem("vp_theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
+<link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
+</head>
+<body>
+{% include "_nav.html" %}
+
+<div class="page">
+  <div class="tools-layout group-layout">
+    {% include "_group_nav.html" %}
+    <main class="group-main">
+  <div class="layout">
+    <div class="col">
+      <!-- 顶栏：模块名 + 模式切换 + 重置 -->
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+        <h1 style="margin:0;font-size:18px">🗺 基因组图谱（gbdraw）</h1>
+        <span class="hint">可交互调参实时预览</span>
+        <div style="display:inline-flex;border:1px solid #ddd;border-radius:6px;overflow:hidden;margin-left:auto">
+          <button class="btn small" id="gp_mode_circular" style="border:none;border-radius:0" onclick="gpSetMode('circular')">Circular 圈图</button>
+          <button class="btn small" id="gp_mode_linear" style="border:none;border-radius:0" onclick="gpSetMode('linear')">Linear 线图</button>
+        </div>
+      </div>
+      <p class="hint">输入三选一：① FASTA（无注释 → 裸骨架图）；② FASTA + GFF3 注释（画 CDS 特征）；③ GenBank（.gb/.gbk，自带注释，可多条记录）。</p>
+
+      <!-- 左右两栏：左=参数，右=预览大屏 -->
+      <div style="display:grid;grid-template-columns:minmax(0,380px) minmax(0,1fr);gap:16px;align-items:start">
+
+        <!-- 左栏：参数配置（sticky 固定 + 内部独立滚动，右侧预览始终可见） -->
+        <div class="card" style="padding:14px;position:sticky;top:14px;max-height:calc(100vh - 28px);overflow-y:auto">
+          <!-- Input -->
+          <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;color:#1a5276">📥 输入</div>
+          <label>基因组 / contigs FASTA</label>
+          <div class="filerow">
+            <input id="gp_fa" type="text" placeholder=".fasta / .fna[.gz]；填了 GenBank 时可空">
+            <button class="btn small" onclick="browse('gp_fa')">📁</button>
+            <button class="btn small" onclick="pasteSeq('gp_fa', '.fasta')" title="粘贴 FASTA">📋</button>
+            <button class="btn small" onclick="fillExample('gp_fa')" title="填入内置示例">✨ 示例</button>
+          </div>
+          <label style="margin-top:8px">注释 GFF3 或 GenBank（可选）</label>
+          <div class="filerow">
+            <input id="gp_ann" type="text" placeholder="可选；.gb/.gbk/.gff[.gz]">
+            <button class="btn small" onclick="browse('gp_ann')">📁</button>
+            <button class="btn small" onclick="pasteSeq('gp_ann', '.txt')" title="粘贴文本">📋</button>
+            <button class="btn small" onclick="fillExample('gp_ann', EXAMPLE_GENBANK_GB); var f=$('gp_fa'); if(f) f.value='';" title="填入内置示例 GenBank（自带注释）">✨ 示例 .gb</button>
+          </div>
+
+          <!-- Basic -->
+          <div style="font-size:12.5px;font-weight:700;margin:14px 0 8px;color:#1a5276">⚙️ 基本</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <div class="gp-item">
+              <label>绘图引擎</label>
+              <select id="gp_engine"><option value="gbdraw">gbdraw（推荐）</option></select>
+            </div>
+            <div class="gp-item">
+              <label>最多出图序列数</label>
+              <input id="gp_max" type="number" value="12" min="1" max="100">
+            </div>
+          </div>
+          <div style="margin-top:10px">
+            <label class="chk"><input type="checkbox" id="gp_interactive" onchange="gpInteractiveToggle()"> 🪄 交互模式（调参实时预览，手动保存）</label>
+            <div class="hint" id="gp_inter_hint" style="display:none;margin-top:2px">调参即预览（不落盘）；满意后点「💾 保存结果」才真正保存</div>
+          </div>
+
+          <!-- 绘图参数（Basic 布局部分） -->
+          <div style="font-size:12.5px;font-weight:700;margin:14px 0 8px;color:#1a5276">🎛 绘图参数</div>
+          <div style="display:grid;grid-template-columns:1fr;gap:8px">
+            <div class="gp-item"><label>调色板</label>
+              <select id="gp_palette" onchange="gpPreview()">
+                <option value="">默认（default）</option><option value="mint">mint</option>
+                <option value="soft_pastels">soft_pastels</option><option value="forest">forest</option>
+                <option value="fugaku">fugaku</option><option value="sakura">sakura</option>
+                <option value="kuroshio">kuroshio</option><option value="oceanic_voyage">oceanic_voyage</option>
+                <option value="autumn">autumn</option><option value="desert_mirage">desert_mirage</option>
+                <option value="volcano">volcano</option><option value="zen">zen</option>
+              </select></div>
+            <div class="gp-item"><label>特征布局</label>
+              <select id="gp_track_type" onchange="gpPreview()">
+                <option value="">默认</option><option value="tuckin">嵌入（tuckin）</option>
+                <option value="middle">居中（middle）</option><option value="spreadout">铺开（spreadout）</option>
+              </select></div>
+            <div class="gp-item"><label>CDS 形态</label>
+              <select id="gp_feature_shape" onchange="gpPreview()">
+                <option value="">默认（箭头）</option><option value="rectangle">矩形（rectangle）</option>
+                <option value="arrow">箭头（arrow）</option>
+              </select></div>
+            <div class="gp-item"><label>标签显示</label>
+              <select id="gp_labels" onchange="gpPreview()">
+                <option value="">默认</option><option value="none">无</option>
+                <option value="out">仅外圈</option><option value="both">内圈+外圈</option>
+              </select></div>
+            <div class="gp-item"><label>GC 内容模式</label>
+              <select id="gp_gc_mode" onchange="gpPreview()">
+                <option value="">默认（偏差）</option><option value="deviation">偏差（deviation）</option>
+                <option value="percent">百分比（percent）</option>
+              </select></div>
+            <div class="gp-item"><label>分离链</label>
+              <select id="gp_separate" onchange="gpPreview()">
+                <option value="">不分离</option><option value="1">分离正负链</option>
+              </select></div>
+          </div>
+
+          <!-- 进阶设置 -->
+          <details class="rpt-sec" id="gp_adv_panel" style="margin-top:12px">
+            <summary>🔧 进阶设置（GC 轨道 / 标题 / 刻度 / 特征 / 输出）</summary>
+            <div class="rpt-sec-body" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <div class="gp-item"><label>GC 轨道</label><select id="gp_gc_track" onchange="gpPreview()"><option value="">显示</option><option value="nogc">隐藏</option></select></div>
+              <div class="gp-item"><label>GC 轨道宽度</label><input id="gp_gc_width" type="number" step="10" placeholder="默认"></div>
+              <div class="gp-item"><label>GC 轨道半径</label><input id="gp_gc_radius" type="number" step="10" placeholder="默认"></div>
+              <div class="gp-item"><label>Skew 轨道</label><select id="gp_skew_track" onchange="gpPreview()"><option value="">显示</option><option value="noskew">隐藏</option></select></div>
+              <div class="gp-item"><label>Skew 轨道宽度</label><input id="gp_skew_width" type="number" step="10" placeholder="默认"></div>
+              <div class="gp-item"><label>Skew 轨道半径</label><input id="gp_skew_radius" type="number" step="10" placeholder="默认"></div>
+              <div class="gp-item"><label>标题</label><input id="gp_title" type="text" placeholder="如 Nicotiana tabacum 叶绿体"></div>
+              <div class="gp-item"><label>标题位置</label><select id="gp_title_pos" onchange="gpPreview()"><option value="">顶部（自动）</option><option value="top">顶部</option><option value="bottom">底部</option></select></div>
+              <div class="gp-item"><label>标题字号</label><input id="gp_title_size" type="number" step="1" placeholder="默认"></div>
+              <div class="gp-item"><label>物种名</label><input id="gp_species" type="text" placeholder="可选"></div>
+              <div class="gp-item"><label>株名</label><input id="gp_strain" type="text" placeholder="可选"></div>
+              <div class="gp-item"><label>定义字号</label><input id="gp_def_size" type="number" step="1" placeholder="默认"></div>
+              <div class="gp-item"><label>刻度区间</label><input id="gp_scale" type="number" step="100" placeholder="默认"></div>
+              <div class="gp-item"><label>坐标刻度</label><select id="gp_show_scale" onchange="gpPreview()"><option value="">显示</option><option value="hide">隐藏</option></select></div>
+              <div class="gp-item"><label>标签字号</label><input id="gp_label_size" type="number" step="1" placeholder="默认"></div>
+              <div class="gp-item"><label>标签布局</label><select id="gp_label_place" onchange="gpPreview()"><option value="">默认</option><option value="horizontal">水平</option><option value="radial">径向</option></select></div>
+              <div class="gp-item"><label>特征宽度</label><input id="gp_feat_width" type="number" step="5" placeholder="默认"></div>
+              <div class="gp-item"><label>箭头头部比例</label><input id="gp_arrow_head" type="number" step="0.05" placeholder="默认"></div>
+              <div class="gp-item"><label>输出格式</label><select id="gp_format" onchange="gpPreview()"><option value="">SVG（默认）</option><option value="png">PNG</option><option value="pdf">PDF</option><option value="ps">PS</option><option value="eps">EPS</option></select></div>
+              <div class="gp-item"><label>多记录画布</label><select id="gp_multi" onchange="gpPreview()"><option value="">单条</option><option value="canvas">多记录共画布</option></select></div>
+            </div>
+          </details>
+
+          <!-- Generate 按钮 -->
+          <div style="margin-top:12px">
+            <button class="btn primary" id="gp_run_btn" onclick="runGenoplot(this)">▶ 运行并保存</button>
+            <button class="btn" id="gp_save_btn" style="display:none" onclick="saveGenoplot(this)">💾 保存结果</button>
+          </div>
+
+          <!-- 输出 -->
+          <div class="tool-out" style="margin-top:12px">
+            <div class="tool-out-head">📤 输出</div>
+            <div class="toolrun" id="toolrun-genoplot"></div>
+            <div class="rh" id="rh-genoplot"></div>
+          </div>
+        </div>
+
+        <!-- 右栏：实时预览大屏 -->
+        <div class="card" style="padding:14px;min-height:520px;position:sticky;top:14px">
+          <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;color:#1a5276">🔍 实时预览大屏</div>
+          <div id="gp_preview" style="display:none">
+            <div id="gp_preview_body"><p class="hint">勾选「🪄 交互模式」并选择输入后，调参即在此实时预览。满意后点左栏「💾 保存结果」落盘。</p></div>
+          </div>
+          <div id="gp_preview_standby" style="color:#789;font-size:12.5px;padding:40px 10px;text-align:center">
+            🪄 勾选交互模式 → 选输入 → 调参实时预览<br><span style="font-size:11px">（未落盘，满意后保存）</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+    </main>
+  </div>
+</div>
+
+<!-- 文件/目录选择对话框 -->
+<div id="dlgMask" class="dlgmask" style="display:none">
+  <div class="dlg">
+    <div class="dlghead"><b data-i18n="c.chooseFile">选择文件</b>
+      <button class="btn small" onclick="closeDlg()">✕</button></div>
+    <div id="dlgPath" class="dlgpath"></div>
+    <div id="dlgList" class="dlglist"></div>
+    <div id="dlgPickDir" style="display:none;padding:10px 16px;border-top:1px solid var(--line-100);text-align:right">
+      <button class="btn small primary" onclick="pickDir()" data-i18n="c.pickDir">选择此目录 ✔</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/i18n.js?v={{ asset_v }}"></script>
+<script src="/static/app.js?v={{ asset_v }}"></script>
+<script>
+/* $ / esc / browse / startPolling / taskLogOpen 均来自 app.js */
+function val(id) { return ($(id)?.value || '').trim(); }
+
+async function _runTool(tool, params, btn, busyText) {
+  try {
+    const r = await fetch('/api/tool/run', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tool, params })});
+    if (!r.ok) { alert('启动失败: ' + ((await r.json()).error || '')); return; }
+    const d = await r.json();
+    taskLogOpen.add(d.task);
+    startPolling();
+    $('tasks')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    watchTaskBtn(d.task, btn, busyText || '⏳ 运行中…');
+  } catch (e) { alert('无法连接平台服务: ' + e); }
+}
+
+/* 模式切换：circular / linear / both（默认 both） */
+let gp_mode = 'both';
+function gpSetMode(m) {
+  gp_mode = m;
+  const a = $('gp_mode_circular'), b = $('gp_mode_linear');
+  if (a) a.style.background = (m === 'circular' || m === 'both') ? '#e3f2fd' : '';
+  if (b) b.style.background = (m === 'linear' || m === 'both') ? '#e3f2fd' : '';
+  if ($('gp_interactive') && $('gp_interactive').checked) gpPreview();
+}
+
+/* 收集绘图定制参数 → gb_opts（透传 gbdraw CLI） */
+function gpCollectOpts() {
+  const o = {};
+  if (val('gp_palette')) o.palette = val('gp_palette');
+  if (val('gp_track_type')) o.track_type = val('gp_track_type');
+  if (val('gp_feature_shape')) o.feature_shape = 'CDS=' + val('gp_feature_shape');   // rectangle/arrow
+  // gbdraw 默认 labels=none 不显示基因名/功能名；默认设为 out（显示基因名）
+  o.labels = val('gp_labels') || 'out';
+  if (val('gp_gc_mode')) o.gc_content_mode = val('gp_gc_mode');
+  if (val('gp_separate') === '1') o.separate_strands = true;
+  if (val('gp_gc_track') === 'nogc') { o.gc = false; o.no_gc = true; }
+  if (+val('gp_gc_width')) o.gc_content_width = +val('gp_gc_width');
+  if (+val('gp_gc_radius')) o.gc_content_radius = +val('gp_gc_radius');
+  if (val('gp_skew_track') === 'noskew') { o.skew = false; o.no_skew = true; }
+  if (+val('gp_skew_width')) o.gc_skew_width = +val('gp_skew_width');
+  if (+val('gp_skew_radius')) o.gc_skew_radius = +val('gp_skew_radius');
+  if (val('gp_title')) { o.plot_title = val('gp_title'); if (!val('gp_title_pos')) o.plot_title_position = 'top'; }
+  if (val('gp_title_pos')) o.plot_title_position = val('gp_title_pos');
+  if (+val('gp_title_size')) o.plot_title_font_size = +val('gp_title_size');
+  if (val('gp_species')) o.species = val('gp_species');
+  if (val('gp_strain')) o.strain = val('gp_strain');
+  if (+val('gp_def_size')) o.definition_font_size = +val('gp_def_size');
+  if (+val('gp_scale')) o.scale_interval = +val('gp_scale');
+  if (val('gp_show_scale') === 'hide') o.hide_scale = true;
+  if (+val('gp_label_size')) o.label_font_size = +val('gp_label_size');
+  if (val('gp_label_place')) o.label_placement = val('gp_label_place');
+  if (+val('gp_feat_width')) o.feature_width = +val('gp_feat_width');
+  if (+val('gp_arrow_head')) o.arrow_head_length_ratio = +val('gp_arrow_head');
+  if (val('gp_format')) o.format = val('gp_format');
+  if (val('gp_multi') === 'canvas') o.multi_record_canvas = true;
+  return o;
+}
+
+/* 交互模式切换：显示/隐藏预览区、切换按钮 */
+function gpInteractiveToggle() {
+  const on = $('gp_interactive') && $('gp_interactive').checked;
+  $('gp_preview').style.display = on ? '' : 'none';
+  $('gp_preview_standby').style.display = on ? 'none' : '';
+  $('gp_inter_hint').style.display = on ? '' : 'none';
+  $('gp_save_btn').style.display = on ? '' : 'none';
+  $('gp_run_btn').style.display = on ? 'none' : '';
+  if (on) gpPreview();
+}
+
+let _gpPreviewTimer = null;
+function gpPreview() {
+  if (!($('gp_interactive') && $('gp_interactive').checked)) return;
+  if (!val('gp_fa') && !val('gp_ann')) { alert('请先选择 FASTA 或 GenBank 输入'); return; }
+  clearTimeout(_gpPreviewTimer);
+  _gpPreviewTimer = setTimeout(async () => {
+    const body = document.getElementById('gp_preview_body');
+    body.innerHTML = '<p class="hint">⏳ 正在渲染预览…</p>';
+    try {
+      const r = await fetch('/api/tool/genoplot_preview', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fasta: val('gp_fa'), ann: val('gp_ann'), mode: gp_mode, gb_opts: gpCollectOpts() })});
+      const d = await r.json();
+      if (!r.ok) { body.innerHTML = '<p class="hint">预览失败: ' + (d.error || r.status) + '</p>'; return; }
+      body.innerHTML = '<div style="overflow:auto;background:#fff;border-radius:8px;padding:10px">' + d.svg + '</div>';
+    } catch (e) { body.innerHTML = '<p class="hint">预览失败: ' + e + '</p>'; }
+  }, 500);
+}
+
+function runGenoplot(btn) {
+  if (!val('gp_fa') && !val('gp_ann')) { alert('请选择 FASTA 或 GenBank 输入'); return; }
+  _runTool('genoplot', {
+    fasta: val('gp_fa'), ann: val('gp_ann'),
+    engine: $('gp_engine').value, max_plots: +val('gp_max') || 12,
+    mode: gp_mode, gb_opts: gpCollectOpts() }, btn, '⏳ 出图中…');
+}
+function saveGenoplot(btn) { runGenoplot(btn); }
+
+document.querySelectorAll('[id^="gp_"]').forEach(el => {
+  el.addEventListener('change', () => {
+    if ($('gp_interactive') && $('gp_interactive').checked) gpPreview();
+  });
+});
+
+startPolling();
+</script>
+</body>
+</html>

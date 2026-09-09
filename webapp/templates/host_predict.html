@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>宿主预测 - 植物病毒分析平台</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="vp-lang" content="{{ lang }}">
+<script>try{if(localStorage.getItem("vp_theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
+<link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
+</head>
+<body>
+{% include "_nav.html" %}
+
+<div class="page">
+  <div class="tools-layout group-layout">
+    {% include "_group_nav.html" %}
+    <main class="group-main">
+  <div class="layout">
+    <div class="col">
+      <div class="card">
+        <h1 data-i18n="hp.title">🧲 宿主预测（ICTV 级联）</h1>
+        <p class="hint" data-i18n="hp.hint">独立模块：对病毒 contigs 做 ICTV 宿主概率级联预测
+        （Order / Family / Genus / Species 四级查表），结合 NCBI 宿主元数据与
+        已知宿主交叉验证。输入 = 病毒 contig 分类表 TSV（自动识别列名）。</p>
+
+        <label data-i18n="hp.tsvLabel">病毒 contig 分类表 TSV（必选）</label>
+        <div class="filerow">
+          <input id="hp_tsv" type="text" data-i18n-ph="hp.tsvPh"
+                 placeholder="管道③ virus_contigs.tsv 或 工具④ virus_classification.tsv">
+          <button class="btn small" onclick="browse('hp_tsv')">📁</button>
+          <button class="btn small" onclick="pasteSeq('hp_tsv', '.tsv')" title="粘贴 TSV" data-i18n-title="hp.pasteTsv">📋</button>
+        </div>
+        <p class="hint" data-i18n="hp.pathHint">管道样品在 <code>results/&lt;样品&gt;/03_assembly/virus_contigs.tsv</code>；
+        专项工具④运行在 <code>tool_runs/contigs_*/virus_classification.tsv</code>。</p>
+
+        <label data-i18n="hp.faLabel">viral_contigs.fasta（可选，配套 contigs 序列）</label>
+        <div class="filerow">
+          <input id="hp_fa" type="text" data-i18n-ph="hp.faPh" placeholder="可选">
+          <button class="btn small" onclick="browse('hp_fa')">📁</button>
+          <button class="btn small" onclick="pasteSeq('hp_fa', '.fasta')" title="粘贴 FASTA" data-i18n-title="hp.pasteFa">📋</button>
+        </div>
+
+        <div style="display:flex;gap:16px;flex-wrap:wrap">
+          <div class="gp-item">
+            <label data-i18n="hp.threads">线程数（留空=自动）</label>
+            <input id="hp_threads" type="number" min="1" data-i18n-ph="hp.autoPh" placeholder="自动">
+          </div>
+        </div>
+
+        <div style="margin-top:12px">
+          <button class="btn primary" onclick="runHostPredict(this)" data-i18n="hp.runBtn">▶ 运行宿主预测</button>
+        </div>
+
+        <div class="tool-out">
+          <div class="tool-out-head" data-i18n="c.outHead">📤 输出</div>
+          <div class="toolrun" id="toolrun-hostpredict"></div>
+        </div>
+        <p class="hint" data-i18n="hp.artifacts">产物：host_prediction.tsv（逐 contig 预测宿主 + 置信度 + 方法）、
+        summary.json。桑基 / 旭日图在样品报告（⑩）中展示。</p>
+      <div class="rh" id="rh-hostpredict"></div>
+      </div>
+    </div>
+  </div>
+    </main>
+  </div>
+</div>
+
+<!-- 文件/目录选择对话框 -->
+<div id="dlgMask" class="dlgmask" style="display:none">
+  <div class="dlg">
+    <div class="dlghead"><b data-i18n="c.chooseFile">选择文件</b>
+      <button class="btn small" onclick="closeDlg()">✕</button></div>
+    <div id="dlgPath" class="dlgpath"></div>
+    <div id="dlgList" class="dlglist"></div>
+    <div id="dlgPickDir" style="display:none;padding:10px 16px;border-top:1px solid var(--line-100);text-align:right">
+      <button class="btn small primary" onclick="pickDir()" data-i18n="c.pickDir">选择此目录 ✔</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/i18n.js?v={{ asset_v }}"></script>
+<script src="/static/app.js?v={{ asset_v }}"></script>
+<script>
+/* $ / esc / browse / startPolling / taskLogOpen 均来自 app.js */
+
+function val(id) { return ($(id)?.value || '').trim(); }
+
+async function runHostPredict(btn) {
+  if (!val('hp_tsv')) { alert(t('hp.needTsv','请选择病毒 contig 分类表 TSV')); return; }
+  const params = { tsv: val('hp_tsv'), fasta: val('hp_fa') };
+  try {
+    const r = await fetch('/api/tool/run', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tool: 'hostpredict',
+                             threads: +val('hp_threads') || null, params })});
+    if (!r.ok) { alert(t('hp.startFail','启动失败: ') + ((await r.json()).error || '')); return; }
+    const d = await r.json();
+    taskLogOpen.add(d.task);
+    startPolling();
+    $('tasks')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    watchTaskBtn(d.task, btn, t('hp.busy','⏳ 预测中…'));
+  } catch (e) { alert(t('hp.connFail','无法连接平台服务: ') + e); }
+}
+
+startPolling();
+</script>
+</body>
+</html>

@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="vp-lang" content="{{ lang }}">
+<title>设置 - 植物病毒分析平台</title>
+<script>try{if(localStorage.getItem("vp_theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
+<link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
+</head>
+<body>
+{% include "_nav.html" %}
+
+<div class="page">
+  <div class="pipe-head">
+    <div>
+      <h1 data-i18n="se.title">设置</h1>
+      <p class="hint" data-i18n="se.hint">语言、通用参数与分析默认值；保存后写入 platform.json 并立即生效。</p>
+    </div>
+  </div>
+
+  <div class="settings-grid">
+    <!-- 通用设置 -->
+    <section class="card" style="margin-bottom:18px">
+      <h2 data-i18n="se.outRoot">📁 输出目录</h2>
+      <p class="hint" data-i18n="se.outRootHint">所有分析产物写入此目录，并按推荐结构自动创建子目录：
+         results（样品结果）/ tool_runs（工具运行）/ downloads（数据下载）/
+         meta_search（公共数据检索）/ logan（溯源）/ submissions（提交准备）/ logs（日志）。
+         留空 = 使用平台目录。修改立即生效；历史样品保留在原位置，改回即可查看。</p>
+      <div class="set-row">
+        <div class="s-label" data-i18n="se.outRootLabel">自定义输出根目录</div>
+        <div class="s-ctrl" style="display:flex;gap:8px;width:100%">
+          <input id="outRoot" style="flex:1" placeholder=""
+                 data-i18n-ph="se.outRootPh">
+          <button class="btn small" onclick="browseDir('outRoot')">📁 <span data-i18n="se.pick">浏览</span></button>
+          <button class="btn small primary" onclick="applyOutputRoot($('outRoot').value.trim())" data-i18n="se.outRootApply">应用</button>
+          <button class="btn small" onclick="applyOutputRoot('')" data-i18n="se.outRootReset">恢复默认</button>
+        </div>
+      </div>
+      <div id="outRootMsg" class="hint" style="margin-top:6px"></div>
+  </section>
+
+  <section class="card" style="margin-bottom:18px">
+      <h2 data-i18n="se.inRoot">📥 输入目录</h2>
+      <p class="hint" data-i18n="se.inRootHint">测序数据与上传文件的位置，自动创建子目录：fastq（测序数据）/ uploads（拖拽上传）。留空 = 使用平台目录。文件选择对话框默认从这里打开。</p>
+      <div class="set-row">
+        <div class="s-label" data-i18n="se.inRootLabel">自定义输入根目录</div>
+        <div class="s-ctrl" style="display:flex;gap:8px;width:100%">
+          <input id="inRoot" style="flex:1">
+          <button class="btn small" onclick="browseDir('inRoot')">📁 <span data-i18n="se.pick">浏览</span></button>
+          <button class="btn small primary" onclick="applyRoot('input_root', $('inRoot').value.trim(), 'inRootMsg')" data-i18n="se.outRootApply">应用</button>
+          <button class="btn small" onclick="applyRoot('input_root', '', 'inRootMsg')" data-i18n="se.outRootReset">恢复默认</button>
+        </div>
+      </div>
+      <div id="inRootMsg" class="hint" style="margin-top:6px"></div>
+  </section>
+
+  <section class="card" style="margin-bottom:18px">
+      <h2 data-i18n="se.dbRoot">🗄 数据库目录</h2>
+      <p class="hint" data-i18n="se.dbRootHint">kunpeng 库、taxonomy、palmdb 等大数据目录与建库源数据（host-db / virus-db）的位置，自动创建子目录：databases / host-db / virus-db。留空 = 使用平台目录。⚠ 切换后需把原 databases、host-db、virus-db 内容复制到新位置（或在「数据库构建」页重建），否则工具②④不可用。</p>
+      <div class="set-row">
+        <div class="s-label" data-i18n="se.dbRootLabel">自定义数据库根目录</div>
+        <div class="s-ctrl" style="display:flex;gap:8px;width:100%">
+          <input id="dbRoot" style="flex:1">
+          <button class="btn small" onclick="browseDir('dbRoot')">📁 <span data-i18n="se.pick">浏览</span></button>
+          <button class="btn small primary" onclick="applyRoot('database_root', $('dbRoot').value.trim(), 'dbRootMsg')" data-i18n="se.outRootApply">应用</button>
+          <button class="btn small" onclick="applyRoot('database_root', '', 'dbRootMsg')" data-i18n="se.outRootReset">恢复默认</button>
+        </div>
+      </div>
+      <div id="dbRootMsg" class="hint" style="margin-top:6px"></div>
+  </section>
+
+  <section class="card" style="margin-bottom:18px">
+      <h2 data-i18n="se.storage">💾 存储与磁盘</h2>
+      <p class="hint" data-i18n="se.storageHint">磁盘剩余空间与各目录占用。
+         目录占用为后台统计（数据库较大时约需几十秒），结果缓存 10 分钟。
+         平台所在盘剩余低于 20GB 时，页面顶部会出现黄色水位横幅。</p>
+      <div id="storagePanel" style="margin-top:10px"></div>
+  </section>
+
+  <section class="card">
+      <h2 data-i18n="se.general">通用设置</h2>
+      <div class="set-row">
+        <div class="s-label" data-i18n="se.theme">界面主题</div>
+        <div class="s-ctrl lang-seg" id="themeSeg">
+          <button type="button" data-theme="light" data-i18n="se.light">浅色</button>
+          <button type="button" data-theme="dark" data-i18n="se.dark">深色</button>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="s-label" data-i18n="se.language">界面语言 / Language</div>
+        <div class="s-ctrl lang-seg" id="langSeg">
+          <button type="button" data-lang="zh">中文</button>
+          <button type="button" data-lang="en">English</button>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="s-label"><span data-i18n="se.threads">全局线程数</span>
+          <small data-i18n="se.threadsHint">分析任务默认使用的线程数</small></div>
+        <div class="s-ctrl"><input id="setThreads" type="number" min="1"></div>
+      </div>
+      <div class="set-row">
+        <div class="s-label"><span data-i18n="se.email">NCBI EUtils 邮箱（可选）</span>
+          <small data-i18n="se.emailHint">NCBI 在线检索的礼貌性联系邮箱</small></div>
+        <div class="s-ctrl"><input id="setEmail" type="text" placeholder="name@example.com"></div>
+      </div>
+    </section>
+
+    <!-- 数据库状态 -->
+    <section class="card">
+      <h2 data-i18n="se.dbs">数据库</h2>
+      <div id="setDbBadges" class="dbbadge"></div>
+      <div id="setDbRows"></div>
+    </section>
+  </div>
+
+  <!-- 分析默认参数 -->
+  <section class="card" style="margin-top:18px">
+    <h2 data-i18n="se.defaults">分析默认参数</h2>
+    <p class="hint" data-i18n="se.defaultsHint">管道页与 CLI 未显式传参时使用这里的值；随时可在各步骤卡片上覆盖。</p>
+    <div class="settings-grid" id="defaultsGrid"></div>
+  </section>
+
+  <!-- 平台目录 -->
+  <section class="card" style="margin-top:18px">
+    <h2 data-i18n="se.paths">平台目录</h2>
+    <p class="hint" data-i18n="se.pathsHint">数据与产物的存放位置（打开目录）</p>
+    <div id="setDirRows"></div>
+  </section>
+
+  <!-- 工具探测（环境自检，从「数据库构建」页移入） -->
+  <section class="card" style="margin-top:18px">
+    <h2 id="m-tools" data-i18n="bd.toolDetect">🧰 工具探测</h2>
+    <p class="hint" data-i18n="bd.toolDetectHint">分析所用外部程序（bin/ 与 tools/ 目录）的探测结果；
+       缺失只影响对应功能，不影响平台运行。</p>
+    <div id="toolList" class="tools"></div>
+  </section>
+
+  <div class="savebar">
+    <span class="hint" id="saveHint"></span>
+    <button class="btn primary" onclick="saveSettings()" data-i18n="se.save">💾 保存设置</button>
+  </div>
+</div>
+
+<script src="/static/i18n.js?v={{ asset_v }}"></script>
+<script src="/static/app.js?v={{ asset_v }}"></script>
+<script>
+/* $ / esc / t / setConnBanner 等均来自 i18n.js 与 app.js，勿重复声明 */
+
+let FIELDS = [];
+let DEFS = {};
+
+async function loadSettings() {
+  try {
+    const d = await (await fetch('/api/settings')).json();
+    $('setThreads').value = d.threads || '';
+    $('setEmail').value = d.email || '';
+    $('outRoot').value = d.output_root || '';
+    $('inRoot').value = d.input_root || '';
+    $('dbRoot').value = d.database_root || '';
+    FIELDS = d.default_fields || [];
+    DEFS = d.defaults || {};
+    renderDefaults(d.language === 'en');
+    renderDbs(d);
+    renderDirs(d);
+    markLang(d.language);
+  } catch (e) {
+    $('saveHint').textContent = t('c.loadFail', '读取失败') + ': ' + e;
+  }
+}
+
+function markLang(lang) {
+  document.querySelectorAll('#langSeg button').forEach(b =>
+    b.classList.toggle('on', b.dataset.lang === lang));
+}
+
+function markTheme() {
+  const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  document.querySelectorAll('#themeSeg button').forEach(b =>
+    b.classList.toggle('on', b.dataset.theme === cur));
+}
+
+document.querySelectorAll('#themeSeg button').forEach(b =>
+  b.addEventListener('click', () => { applyTheme(b.dataset.theme); markTheme(); }));
+markTheme();
+
+function renderDefaults(en) {
+  const grid = $('defaultsGrid');
+  grid.innerHTML = FIELDS.map(f => {
+    const label = en ? (f.label_en || f.label_zh) : f.label_zh;
+    const val = DEFS[f.key] !== undefined ? DEFS[f.key] : f.def;
+    let ctrl = '';
+    if (f.type === 'select') {
+      const opts = (f.opts || []).map(o =>
+        `<option value="${o}" ${String(val) === String(o) ? 'selected' : ''}>${o}</option>`).join('');
+      ctrl = `<select data-def="${f.key}">${opts}</select>`;
+    } else if (f.type === 'bool') {
+      ctrl = `<select data-def="${f.key}">
+        <option value="true" ${val ? 'selected' : ''}>${en ? 'On' : '开'}</option>
+        <option value="false" ${!val ? 'selected' : ''}>${en ? 'Off' : '关'}</option></select>`;
+    } else {
+      const step = f.type === 'float' ? '0.05' : '1';
+      ctrl = `<input type="number" step="${step}" data-def="${f.key}" value="${val}">`;
+    }
+    return `<div class="set-row">
+      <div class="s-label">${esc(label)} <small>${f.key}</small></div>
+      <div class="s-ctrl">${ctrl}</div></div>`;
+  }).join('');
+}
+
+function renderDbs(d) {
+  const badge = (ok, label) =>
+    `<span class="badge ${ok ? 'ok' : 'no'}">${label} ${ok ? '✔' : '✘'}</span>`;
+  fetch('/api/dbs').then(r => r.json()).then(dbs => {
+    $('setDbBadges').innerHTML =
+      badge(dbs.taxonomy.ready, 'NCBI Taxonomy')
+      + badge(dbs.host.ready, t('hm.db.host'))
+      + badge(dbs.virus.ready, t('hm.db.virus'));
+  }).catch(() => {});
+  const rows = [['host', d.databases.host], ['virus', d.databases.virus]]
+    .map(([k, p]) => `<div class="set-row">
+      <div class="s-label">${esc(k)} <small>${esc(p)}</small></div></div>`);
+  $('setDbRows').innerHTML = rows.join('');
+}
+
+function renderDirs(d) {
+  const rows = Object.entries(d.dirs || {}).map(([k, p]) =>
+    `<div class="set-row">
+      <div class="s-label">${esc(k)} <small>${esc(p)}</small></div>
+      <div class="s-ctrl"><button class="btn small" onclick="fetch('/api/open_platform_dir')">${t('se.openBtn')}</button></div>
+    </div>`);
+  $('setDirRows').innerHTML = rows.join('');
+}
+
+async function applyRoot(kind, path, msgId) {
+  const msg = $(msgId);
+  const doneTxt = {output_root: t('se.outRootDone', '✔ 已生效，推荐子目录已就绪'),
+                   input_root: t('se.inRootDone', '✔ 已生效，fastq / uploads 子目录已就绪'),
+                   database_root: t('se.dbRootDone', '✔ 已生效，数据库子目录已就绪')}[kind];
+  try {
+    const r = await fetch('/api/settings', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({[kind]: path})});
+    if (!r.ok) { msg.textContent = '✘ ' + ((await r.json()).error || '失败');
+                 return; }
+    const d = await r.json();
+    msg.textContent = doneTxt;
+    // 切换数据库目录后即时反馈各库就绪状态（提示用户迁移/对接库文件）
+    if (kind === 'database_root' && d.dbs) {
+      const parts = [];
+      if (!d.dbs.taxonomy) parts.push('NCBI Taxonomy 缺失');
+      if (!d.dbs.host) parts.push('宿主库缺失');
+      if (!d.dbs.virus) parts.push('病毒库缺失');
+      msg.textContent = parts.length
+        ? '⚠ ' + parts.join('、') + '——新位置还没有库，请迁移（python main.py db-migrate --to 目标路径）或到「数据库构建」页重建'
+        : '✔ 已生效，宿主库 / 病毒库 / Taxonomy 均就绪';
+      toast(msg.textContent, '', {ttl: 6000});
+    } else {
+      toast(doneTxt, '', {ttl: 3000});
+    }
+    loadSettings();
+  } catch (e) { msg.textContent = String(e); }
+}
+
+async function applyOutputRoot(path) {
+  await applyRoot('output_root', path, 'outRootMsg');
+}
+
+async function saveSettings() {
+  const defaults = {};
+  document.querySelectorAll('[data-def]').forEach(el => {
+    let v = el.value;
+    const f = FIELDS.find(x => x.key === el.dataset.def);
+    if (f && f.type === 'bool') v = (v === 'true');
+    defaults[el.dataset.def] = v;
+  });
+  const body = {
+    language: VP_LANG,
+    threads: +$('setThreads').value || undefined,
+    email: $('setEmail').value.trim(),
+    defaults,
+  };
+  try {
+    const r = await fetch('/api/settings', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)});
+    if (!r.ok) { alert(t('c.fail', '保存失败') + ': ' + (await r.json()).error); return; }
+    $('saveHint').textContent = t('se.saved', '✔ 已保存并生效');
+    toast(t('se.saved', '✔ 已保存并生效'), '', {ttl: 3000});
+    setTimeout(() => { $('saveHint').textContent = ''; }, 4000);
+  } catch (e) {
+    setConnBanner(true);
+  }
+}
+
+document.querySelectorAll('#langSeg button').forEach(b =>
+  b.addEventListener('click', () => setLang(b.dataset.lang)));
+
+loadSettings();
+loadTools();
+</script>
+</body>
+</html>

@@ -1,0 +1,103 @@
+<!DOCTYPE html><html lang="zh"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>{{ run_title }} — GenBank Submission Report</title>
+<style>{{ css }}</style></head><body>
+<div class="header">
+<h1>GenBank Submission Report — {{ run_title }}</h1>
+<div class="meta">Generated: {{ timestamp }} | Pipeline: {{ pipeline }}</div>
+<div class="stats">
+<div class="stat"><div class="num">{{ n_seqs }}</div><div class="label">Seq</div></div>
+<div class="stat"><div class="num">{{ n_viruses }}</div><div class="label">Virus</div></div>
+<div class="stat ok"><div class="num" id="completeness">-</div><div class="label">Complete</div></div>
+<div class="stat warn"><div class="num" id="missingCount">-</div><div class="label">Missing</div></div>
+</div>
+<div class="progress"><div class="progress-bar" id="completeBar"></div></div>
+<div class="suvtk-summary" style="background:#f5f5f5;padding:10px 16px;border-radius:6px;font-size:13px;color:#555;margin-top:10px">{{ summary }}</div>
+</div>
+
+<div class="container">
+<div class="toolbar">
+<button class="btn primary" onclick="downloadTSV('srcTable','source.src')">⬇ source.src</button>
+<button class="btn success" onclick="downloadTSV('bsTable','biosample_template.tsv')">⬇ BioSample</button>
+<button class="btn success" onclick="downloadCSV('srcTable','unified_metadata_edited.csv')">💾 Save CSV</button>
+<button class="btn warn" onclick="batchFill('srcTable','Collection_date')">Fill Date</button>
+<button class="btn warn" onclick="batchFill('srcTable','geo_loc_name')">Fill Location</button>
+<button class="btn warn" onclick="batchFill('srcTable','Lat_Lon')">Fill LatLon</button>
+<button class="btn warn" onclick="batchFill('srcTable','Bioproject')">Fill BioProject</button>
+<div style="flex:1"></div>
+<div class="filter"><input type="text" placeholder="Filter sequences..." oninput="filterTable(this.value)"></div>
+</div>
+
+<div class="legend">
+<span><div class="dot missing-dot"></div> Missing</span>
+<span><div class="dot filled-dot"></div> Filled</span>
+<span style="color:#888">| Double-click to edit | Enter = confirm | Tab = next</span>
+</div>
+
+<div class="section" id="srcSection">
+<div class="section-title" onclick="toggleSection('srcSection')">
+source.src / Unified Metadata ({{ n_seqs }} seqs)
+<span style="font-size:10px;color:#999">Double-click any cell to edit</span>
+</div>
+<div class="section-body">
+<table id="srcTable"><thead><tr>{{ src_header }}</tr></thead><tbody>{{ src_body }}</tbody></table>
+</div></div>
+
+<div class="section" id="cmtSection">
+<div class="section-title" onclick="toggleSection('cmtSection')">
+Structured Comment (.cmt) / 结构化注释参数
+<span style="font-size:10px;color:#999">Assembly, Coverage, Annotation</span>
+</div>
+<div class="section-body">
+<table id="cmtTable"><thead><tr>{{ cmt_header }}</tr></thead><tbody>{{ cmt_body }}</tbody></table>
+</div></div>
+
+<div class="section" id="bsSection">
+<div class="section-title" onclick="toggleSection('bsSection')">
+BioSample Template ({{ n_seqs }} samples)
+<span style="font-size:10px;color:#999">Pathogen.cl.1.0 format for NCBI registration</span>
+</div>
+<div class="section-body">
+<table id="bsTable"><thead><tr>{{ bs_header }}</tr></thead><tbody>{{ bs_body }}</tbody></table>
+</div></div>
+
+<div class="section collapsed" id="miuvigSection">
+<div class="section-title" onclick="toggleSection('miuvigSection')">
+MIUVIG Parameters (miuvig.tsv) — Advanced
+<span style="font-size:10px;color:#999">25+ required fields, usually auto-generated</span>
+</div>
+<div class="section-body">
+<table id="miuvigTable"><thead><tr><th>Parameter</th><th>Value</th></tr></thead>
+<tbody>{{ miuvig_body }}</tbody></table>
+</div></div>
+
+<div class="section" id="topoSection">
+<div class="section-title" onclick="toggleSection('topoSection')">
+Viral Topology (topology.tsv) — {{ topo_summary }}
+<span style="font-size:10px;color:#999">Linear/Circular genome determination</span>
+</div>
+<div class="section-body">
+<table id="topoTable"><thead><tr>{{ topo_header }}</tr></thead><tbody>{{ topo_body }}</tbody></table>
+</div></div>
+
+<div class="section collapsed" id="asmSection">
+<div class="section-title" onclick="toggleSection('asmSection')">
+Assembly Parameters (assembly.tsv)
+<span style="font-size:10px;color:#999">Assembly method, sequencing tech</span>
+</div>
+<div class="section-body">
+<table id="asmTable"><thead><tr><th>Parameter</th><th>Value</th></tr></thead>
+<tbody>{{ asm_body }}</tbody></table>
+</div></div>
+
+<div class="section">
+<div class="section-title">Submission Checklist</div>
+<div class="section-body">
+<ul class="checklist">{{ checklist }}</ul>
+<div style="margin-top:10px;font-size:11px;color:#888">
+<b>Workflow:</b> Edit above → Register BioProject/BioSample → NCBI BankIt 上传 .fsa + .tbl（或用 Sequin 桌面程序导入）→ 核对后提交
+</div></div></div>
+
+</div>
+<script>{{ js }}</script>
+</body></html>

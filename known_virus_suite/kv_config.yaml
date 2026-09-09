@@ -1,0 +1,83 @@
+# known_virus_suite 默认参数
+# 命令行参数优先级高于本文件；本文件只放"跑一次就想固定下来"的口径。
+# 所有键名与 known_virus_suite.py 的 CLI 参数一一对应（下划线形式）。
+
+# ── 引擎 ──────────────────────────────────────────────
+engine: minibwa              # salmon | minibwa
+
+# 覆盖度/深度统计后端。默认 pandepth：严格照原管线
+#   virome_analysis_pipeline/batch_virus_depth.py
+#   samtools view -b -F 0x04 建 BAM + pandepth -a（不传 -q，MAPQ 0 起算）
+# pandepth | samtools | builtin
+# 缺件时自动降级：pandepth → samtools → builtin
+coverage_tool: pandepth
+
+# ── 资源 ──────────────────────────────────────────────
+threads: null                # 样本级并行/批次大小；null = 自动（CPU 核数 // 2）
+align_threads: 8             # 引擎内部线程数
+batch_size: 1                # 每批样本数（断点续跑粒度）
+
+# ── 鉴定段阈值（照抄原管线默认）──────────────────────
+# 基础门槛：Sample_Total_Mapped > 0 且 Uniq_Reads >= min_reads 且 TPM >= min_tpm
+min_reads: 10                # 最少 uniq reads
+min_tpm: 1.0                 # 最低 TPM
+min_cov: 10.0                # 覆盖率下限 %（A 轨）
+min_depth: 0.5               # 平均深度下限（A 轨）
+min_poisson: 0.3             # 最低泊松比值（泊松打假）
+min_ani: 0.0                 # 最低 ANI；salmon 伪比对下不可用，置 0 不参与
+
+# ── min_mapq 作用域 ───────────────────────────────────
+# ⚠ 只在 builtin / samtools 后端生效。
+# 默认的 pandepth 后端严格照原管线，MAPQ 0 起算，此参数不生效。
+min_mapq_identify: 10
+
+# ── 过滤段阈值（双轨放行）────────────────────────────
+# A 轨：Coverage >= min_cov 且 Poisson_Ratio >= min_poisson 且 MeanDepth >= min_depth
+# B 轨（RNA 且提供 genes_cov）：gene_total_cov >= 80 且 gene_avr_cov >= 5
+filter:
+  min_cov: 10.0
+  min_depth: 0.5
+  min_reads: 10
+  min_tpm: 1.0
+  min_ani: 0.0
+  min_poisson: 0.3
+  gene_total_cov: 80.0       # B 轨基因总覆盖
+  gene_avr_cov: 5.0          # B 轨基因平均覆盖
+  require_all_segments: true # 多节段病毒须全部段检出，否则整组剔除
+
+# ── 共识段 ───────────────────────────────────────────
+# 完全照抄 virome_analysis_pipeline/batch_virus_variants.py
+# （仅 bowtie2 -> minibwa，awk 瘦身 -> Python 实现）
+consensus:
+  engine: minibwa            # 原管线为 bowtie2，本移植用 minibwa 替代
+  vc_qual: 20                # -q 碱基最低质量（原管线默认）
+  vc_depth: 5                # -d 单碱基最低支持深度（原管线默认）
+  vc_freq: 0.5               # -f 等位基因频率阈值（原管线默认）
+  vc_ambig: N                # -a 低深度位点占位字符
+  jobs: 4                    # 并行样本数
+  auto_depth: true           # 按 MeanDepth 动态调 -d（原管线 line 1171）
+  resume: true               # 已产出共识则跳过
+  n_ratio_max: 5.0           # 蛋白 QC 的 N 比例上限 %
+
+# ── 绘图段 ───────────────────────────────────────────
+# 完全照抄 virome_analysis_pipeline/batch_plot_virus_depth.py --mode depth
+# 移植差异：gzip+rg 管道 -> Python 逐行过滤；efetch -> Bio.Entrez
+plot:
+  window: 10                 # 深度曲线滑动平均窗口
+  fontsize: 9                # 左上角统计框字号
+  add_genes: true            # 叠加 GenBank 基因轨道（需联网下载注释）
+  gbk_dir: null              # GenBank 缓存目录；null = <out>/gbk_files
+  depth_dir: null            # per-position 深度表目录；null = <out>/align
+  summary: null              # 结果表；null = <out>/filter/filtered.tsv
+  ncbi_email: null           # NCBI Entrez 邮箱；null = 环境变量 NCBI_EMAIL
+  ncbi_api_key: null         # NCBI API key；null = 环境变量 NCBI_API_KEY
+
+# ── 输出 ───────────────────────────────────────────
+output:
+  keep_intermediate: true    # 保留 SAM/BAM/中间 TSV
+  refstats_float: 4          # refstats.tsv 小数位
+
+# ── 参考注释（可选）──────────────────────────────────
+# 提供后可获得 Species/Segment 等列，并启用节段完整性规则；
+# 不提供时 Species 回退为 accession。
+ref_info: null

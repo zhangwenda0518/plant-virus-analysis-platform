@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>ORF 预测 - 植物病毒分析平台</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="vp-lang" content="{{ lang }}">
+<script>try{if(localStorage.getItem("vp_theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
+<link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
+</head>
+<body>
+{% include "_nav.html" %}
+
+<div class="page">
+  <div class="tools-layout group-layout">
+    {% include "_group_nav.html" %}
+    <main class="group-main">
+  <div class="layout">
+    <div class="col">
+      <div class="card">
+        <h1>🧬 ORF 预测</h1>
+        <p class="hint">独立模块：pyrodigal（meta 基因模型）+ pyrodigal-rv
+        （RNA/反转录病毒）基因预测。输入 = 核酸 FASTA（病毒 contigs / 基因组均可，
+        如工具④的 viral_contigs.fasta）。
+        基因功能注释请用独立模块「功能注释」。</p>
+
+        <label>输入 FASTA（核酸，必选，支持 .gz）</label>
+        <div class="filerow">
+          <input id="of_fa" type="text" placeholder="选择 .fasta / .fna[.gz]">
+          <button class="btn small" onclick="browse('of_fa')">📁</button>
+          <button class="btn small" onclick="pasteSeq('of_fa', '.fasta')" title="粘贴 FASTA">📋</button>
+          <button class="btn small" onclick="fillExample('of_fa')" title="填入内置示例">✨ 示例</button>
+        </div>
+
+        <div style="display:flex;gap:16px;flex-wrap:wrap">
+          <div class="gp-item">
+            <label>ORF 预测工具</label>
+            <select id="of_tool">
+              <option value="">默认（pyrodigal + pyrodigal-rv）</option>
+              <option value="pyrodigal">仅 pyrodigal（meta 基因模型）</option>
+              <option value="pyrodigal_rv">仅 pyrodigal-rv（RNA/反转录病毒）</option>
+            </select>
+          </div>
+          <div class="gp-item">
+            <label>最短 ORF 长度（aa）</label>
+            <input id="of_min" type="number" value="100" min="30">
+          </div>
+          <div class="gp-item">
+            <label>线程数（留空=自动）</label>
+            <input id="of_threads" type="number" min="1" placeholder="自动">
+          </div>
+        </div>
+
+        <div style="margin-top:12px">
+          <button class="btn primary" onclick="runOrf(this)">▶ 运行 ORF 预测</button>
+        </div>
+
+        <div class="tool-out">
+          <div class="tool-out-head">📤 输出</div>
+          <div class="toolrun" id="toolrun-orf"></div>
+        </div>
+        <p class="hint">产物：pyrodigal(_rv) faa/ffn/gff、summary.json
+        （运行目录 orf_ 开头，可到「功能注释」模块继续注释，
+        功能注释默认采用 pyrodigal-rv 模型，可在该页切换）。</p>
+      <div class="rh" id="rh-orf"></div>
+      </div>
+    </div>
+  </div>
+    </main>
+  </div>
+</div>
+
+<!-- 文件/目录选择对话框 -->
+<div id="dlgMask" class="dlgmask" style="display:none">
+  <div class="dlg">
+    <div class="dlghead"><b data-i18n="c.chooseFile">选择文件</b>
+      <button class="btn small" onclick="closeDlg()">✕</button></div>
+    <div id="dlgPath" class="dlgpath"></div>
+    <div id="dlgList" class="dlglist"></div>
+    <div id="dlgPickDir" style="display:none;padding:10px 16px;border-top:1px solid var(--line-100);text-align:right">
+      <button class="btn small primary" onclick="pickDir()" data-i18n="c.pickDir">选择此目录 ✔</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/i18n.js?v={{ asset_v }}"></script>
+<script src="/static/app.js?v={{ asset_v }}"></script>
+<script>
+/* $ / esc / browse / pasteSeq / fillExample / startPolling / taskLogOpen 均来自 app.js */
+
+function val(id) { return ($(id)?.value || '').trim(); }
+
+async function runOrf(btn) {
+  if (!val('of_fa')) { alert('请选择输入 FASTA'); return; }
+  const params = { fasta: val('of_fa'), min_aa: +val('of_min') || 100,
+                    orf_tool: val('of_tool') };
+  try {
+    const r = await fetch('/api/tool/run', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tool: 'orf',
+                             threads: +val('of_threads') || null, params })});
+    if (!r.ok) { alert('启动失败: ' + ((await r.json()).error || '')); return; }
+    const d = await r.json();
+    taskLogOpen.add(d.task);
+    startPolling();
+    watchTaskBtn(d.task, btn, '⏳ 运行中…');
+  } catch (e) { alert('无法连接平台服务: ' + e); }
+}
+
+startPolling();
+</script>
+</body>
+</html>

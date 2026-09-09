@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="vp-lang" content="{{ lang }}">
+<title>数据下载 - 植物病毒分析平台</title>
+<script>try{if(localStorage.getItem("vp_theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
+<link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
+<style>
+  body.pop-mode .topnav, body.pop-mode .page > .card:first-child { display: none; }
+  body.pop-mode .page { margin: 10px auto; }
+  .dl-file { font-size: 12px; }
+  .dl-file td, .dl-file th { padding: 5px 8px; }
+  .pbar { height: 7px; background: var(--line-100); border-radius: 5px; overflow: hidden; min-width: 110px; }
+  .pbar i { display: block; height: 100%; background: linear-gradient(90deg, var(--green-600), #43b47c); transition: width .4s; }
+  .mono { font-family: var(--mono); font-size: 11.5px; }
+</style>
+</head>
+<body>
+{% include "_nav.html" %}
+
+<div class="page">
+  <div class="tools-layout group-layout">
+    {% include "_group_nav.html" %}
+    <main class="group-main">
+  <div class="pipe-head">
+    <div>
+      <h1 data-i18n="dl.title">📥 公共数据下载</h1>
+      <p class="hint" data-i18n="dl.hint">粘贴 Run 编号（SRR/ERR/DRR 走 ENA 直下 FASTQ.GZ；CRR 走 NGDC/GSA）或完整数据文件 URL，
+         aria2c 多线程下载（自动断点续传 + 字节数/gzip 完整性校验）。完成后可一键转入分析流程。</p>
+      <p class="hint" style="margin:4px 0 0">⚡ 完成下载的文件可一键发送到 样品创建 / 去宿主 / 质控 / 病毒鉴定 模块（自动预填输入框）。</p>
+    </div>
+  </div>
+
+  <!-- 新建下载任务 -->
+  <div class="card" id="createCard">
+    <h2 data-i18n="dl.create">① 新建下载任务</h2>
+    <div class="grid2">
+      <div>
+        <label data-i18n="dl.name">任务名</label>
+        <input id="dlName" type="text" placeholder="如 病毒组雷达-Run列表">
+      </div>
+      <div>
+        <label data-i18n="dl.conc">并发文件数（NGDC 建议低并发防封控）</label>
+        <input id="dlConc" type="number" value="2" min="1" max="4">
+      </div>
+    </div>
+    <label data-i18n="dl.items">编号 / URL 列表（每行一条；SRR·ERR·DRR·CRR 或 https 数据文件 URL；# 开头为注释）</label>
+    <textarea id="dlItems" rows="7" style="font-family:var(--mono);font-size:12px"
+      placeholder="SRR23843744&#10;ERR7586041&#10;CRR125671&#10;# 或: https://ftp.sra.ebi.ac.uk/vol1/fastq/.../xxx.fastq.gz"></textarea>
+    <div style="display:flex;gap:14px;align-items:center;margin-top:8px;flex-wrap:wrap">
+      <label class="chk" style="margin:0"><input type="checkbox" id="dlConv" checked>
+        <span data-i18n="dl.conv">自动转换 .sra → FASTQ（需 fasterq-dump，未装则保留 .sra 并提示）</span></label>
+      <button class="btn primary" onclick="createBatch()" data-i18n="dl.start">⬇ 创建并开始下载</button>
+      <span class="hint" id="dlEngine" style="margin:0"></span>
+    </div>
+    <div class="err" id="dlErr"></div>
+  </div>
+
+  <!-- 任务列表 -->
+  <h2 class="sec" data-i18n="dl.list">② 下载任务</h2>
+  <div id="batchList"><p class="hint" data-i18n="c.loading">加载中…</p></div>
+  </main>
+  </div>
+</div>
+
+<script src="/static/i18n.js?v={{ asset_v }}"></script>
+<script src="/static/app.js?v={{ asset_v }}"></script>
+<script>
+const POP = new URLSearchParams(location.search).get('pop') === '1';
+if (POP) document.body.classList.add('pop-mode');
+
+function fmtBytes(n) {
+  if (!n) return '—';
+  if (n > 1e9) return (n/1e9).toFixed(2) + ' GB';
+  if (n > 1e6) return (n/1e6).toFixed(1) + ' MB';
+  if (n > 1e3) return (n/1e3).toFixed(0) + ' KB';
+  return n + ' B';
+}
+
+/* 速率：B/s → 'x.x MB/s'（低于 1KB/s 视为瞬时抖动，显示 —） */
+function fmtSpeed(bps) {
+  if (!bps || bps < 1024) return '—';
+  if (bps > 1e9) return (bps/1e9).toFixed(2) + ' GB/s';
+  if (bps > 1e6) return (bps/1e6).toFixed(1) + ' MB/s';
+  return (bps/1e3).toFixed(0) + ' KB/s';
+}
+
+function fmtEta(sec) {
+  if (!sec || sec <= 0) return '';
+  if (sec < 60) return sec + '秒';
+  if (sec < 3600) return Math.floor(sec/60) + '分' + (sec % 60) + '秒';
+  const h = Math.floor(sec/3600), m = Math.floor((sec % 3600)/60);
+  return h + '小时' + m + '分';
+}
+
+async function createBatch() {
+  const items = $('dlItems').value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  $('dlErr').textContent = '';
+  if (!items.length) { $('dlErr').textContent = t('dl.needItems', '请粘贴至少一条编号/URL'); return; }
+  try {
+    const r = await fetch('/api/dl/create', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ name: val('dlName') || 'batch',
+                             items, concurrency: +val('dlConc') || 2,
+                             convert_sra: $('dlConv').checked })});
+    if (!r.ok) { $('dlErr').textContent = (await r.json()).error || '创建失败'; return; }
+    $('dlItems').value = '';
+    refresh();
+  } catch (e) { setConnBanner(true); }
+}
+
+/* 实时传输指标条：仅在进行中显示（速度 / 已下载·总量 / 剩余时间） */
+function dlMetrics(b) {
+  const live = ['downloading', 'resolving', 'converting'].includes(b.status);
+  const spd = fmtSpeed(b.speed || 0);
+  const eta = fmtEta(b.eta || 0);
+  if (!live) {
+    // 非进行中：只给一个静态的总量汇总，避免残留上次的速度数字误导
+    if (!b.total_bytes) return '';
+    return `<div class="hint" style="margin:6px 0 0">共 ${fmtBytes(b.total_bytes)}</div>`;
+  }
+  const sizeTxt = b.total_bytes
+    ? `${fmtBytes(b.done_bytes || 0)} / ${fmtBytes(b.total_bytes)}` : '—';
+  return `<div style="display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 0;font-size:12px">
+      <span>速度 <b class="mono">${spd}</b></span>
+      <span>已下载 <b class="mono">${sizeTxt}</b></span>
+      <span>剩余 <b class="mono">${eta || '计算中…'}</b></span>
+    </div>`;
+}
+
+const stMap = { resolving: '解析中', downloading: '下载中', converting: '转换中',
+                completed: '已完成', failed: '失败', cancelled: '已取消',
+                interrupted: '已中断' };
+const fStMap = { pending: '排队中', downloading: '下载中', verifying: '校验中',
+                 done: '完成', failed: '失败', cancelled: '已取消', deleted: '已删文件' };
+
+// 展开过程日志的批次集合（跨 refresh 重渲保持展开状态）
+const blogOpen = new Set();
+function toggleBatchLog(bid) {
+  if (blogOpen.has(bid)) blogOpen.delete(bid);
+  else blogOpen.add(bid);
+  refresh();
+}
+
+function batchHtml(b) {
+  const pct = Math.round((b.overall || 0) * 100);
+  const stat = stMap[b.status] || b.status;
+  const canInto = b.status === 'completed' && b.done > 0;
+  let files = '';
+  if (b.files) {
+    files = `<table class="tbl dl-file"><tr><th>Run</th><th>文件</th><th>大小</th><th>进度</th><th>速度</th><th>状态</th><th>说明</th></tr>` +
+      b.files.map(f => {
+        const fp = Math.round((f.progress || 0) * 100);
+        return `<tr><td class="mono">${esc(f.acc)}</td>` +
+          `<td class="mono" title="${esc(f.url)}">${esc((f.out||'').split(/[\\\\/]/).pop() || '—')}</td>` +
+          `<td class="mono">${fmtBytes(f.done_bytes || 0)}${f.size ? ' / ' + fmtBytes(f.size) : ''}</td>` +
+          `<td><div class="pbar"><i style="width:${fp}%"></i></div></td>` +
+          `<td class="mono">${fmtSpeed(f.speed || 0)}</td>` +
+          `<td>${fStMap[f.status] || f.status}${f.verified ? ' ✔' : ''}</td>` +
+          `<td class="hint" style="margin:0">${esc(f.error || f.organism || '')}</td></tr>`;
+      }).join('') + '</table>';
+  }
+  let logHtml = '';
+  if (blogOpen.has(b.id)) {
+    const tail = b.log_tail || [];
+    logHtml = `<pre class="fileview" style="max-height:160px;overflow:auto">` +
+      (tail.length ? esc(tail.join('\n')) : '<span class="hint">暂无日志</span>') +
+      '</pre>';
+  }
+  return `<div class="card" id="b-${esc(b.id)}">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <b>${esc(b.name)}</b>
+      <span><span class="tstat ${b.status === 'completed' ? 'done' : b.status === 'failed' ? 'failed' : 'running'}">${stat}</span>
+        <span class="hint" style="margin-left:8px">${b.done}/${b.n_files} 文件 · ${pct}% · ${b.n_runs} runs · ${esc(b.created)}</span></span>
+    </div>
+    <div class="bar"><i style="width:${pct}%"></i></div>
+    ${dlMetrics(b)}
+    ${b.convert_msg ? `<p class="hint">${esc(b.convert_msg)}</p>` : ''}
+    ${b.error ? `<div class="err">${esc(b.error)}</div>` : ''}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+      <button class="btn small" onclick="toggleFiles('${esc(b.id)}', this)">📁 ${t('c.files')}</button>
+      <button class="btn small" onclick="toggleBatchLog('${esc(b.id)}')">📋 日志</button>
+      ${['downloading','resolving','converting'].includes(b.status)
+        ? `<button class="btn small danger" onclick="batchAction('${esc(b.id)}','cancel')">✖ ${t('c.cancel')}</button>` : ''}
+      ${b.failed ? `<button class="btn small" onclick="batchAction('${esc(b.id)}','retry')">↻ 重试失败(${b.failed})</button>` : ''}
+      ${canInto ? `<button class="btn small primary" onclick="intoPipeline('${esc(b.id)}')">🧪 ${t('dl.into')}</button>` : ''}
+      <button class="btn small" onclick="batchAction('${esc(b.id)}','delete_files')"
+              title="只删除已下载的数据文件，保留批次记录与日志">📂 删文件</button>
+      <button class="btn small" onclick="batchAction('${esc(b.id)}','delete_record')"
+              title="只删除批次记录与日志，数据文件保留在磁盘">🧾 删记录</button>
+      <button class="btn small danger" onclick="batchAction('${esc(b.id)}','delete')"
+              title="批次记录、日志与文件全部删除">🗑 全删</button>
+    </div>
+    ${logHtml}
+    <div class="filelist" style="display:none;margin-top:8px;max-height:340px" data-loaded="0"></div>
+  </div>`;
+}
+
+/* 文件列表每页 20 行（页码状态跨轮询刷新保持） */
+const dlFileCache = {};
+const dlFilePage = {};
+
+async function toggleFiles(bid, btn) {
+  const box = btn.closest('.card').querySelector('.filelist');
+  if (box.style.display !== 'none') { box.style.display = 'none'; return; }
+  box.style.display = '';
+  if (!dlFileCache[bid]) {
+    const b = await (await fetch('/api/dl/batch/' + encodeURIComponent(bid))).json();
+    dlFileCache[bid] = b.files || [];
+  }
+  renderDlFiles(bid, box);
+}
+
+function dlFileGo(bid, p) {
+  dlFilePage[bid] = p;
+  const card = document.getElementById('b-' + bid);
+  const box = card && card.querySelector('.filelist');
+  if (box && box.style.display !== 'none') renderDlFiles(bid, box);
+}
+
+/* 按 Run 号把已完成文件配成 R1/R2 对：文件名去掉 .fastq/.fq 等后缀后以 _R2/_2/_r2 结尾的判为 R2，
+   同 acc 的另一个即配对；配不上的按单端处理（r2 留空） */
+function dlPairs(files) {
+  const map = {};
+  for (const f of files || []) {
+    if (f.status !== 'done') continue;
+    const acc = f.acc || (f.out || '').split(/[\\/]/)[0];
+    map[acc] = map[acc] || { r1: '', r2: '' };
+    if (/(_|\.)(R2|2)$/i.test((f.out || '').replace(/\.(fastq|fq|fasta|fa)(\.gz)?$/i, ''))) {
+      if (!map[acc].r2) map[acc].r2 = f.out;
+    } else if (!map[acc].r1) map[acc].r1 = f.out;
+    else if (!map[acc].r2) map[acc].r2 = f.out;
+  }
+  return map;
+}
+
+function renderDlFiles(bid, box) {
+  const all = dlFileCache[bid] || [];
+  const pairs = dlPairs(dlFileCache[bid]);
+  const pages = Math.max(1, Math.ceil(all.length / PER_PAGE));
+  const page = Math.min(Math.max(1, dlFilePage[bid] || 1), pages);
+  const rows = all.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+  box.innerHTML = (rows.map(f => {
+    if (f.status !== 'done') {
+      return `<div class="hint" style="margin:2px 0">• ${esc((f.out||'').split(/[\\/]/).pop() || f.acc)} — ${fStMap[f.status] || f.status}</div>`;
+    }
+    // 配对发送：点 R2 行时仍按 R1/R2 顺序带上另一端；单端只带 r1
+    const pr = pairs[f.acc] || {};
+    const isR2 = !!pr.r2 && pr.r2 === f.out;
+    const r1 = isR2 ? (pr.r1 || f.out) : f.out;
+    const r2 = isR2 ? f.out : (pr.r2 || '');
+    // out 为绝对路径且含反斜杠：转成正斜杠再内嵌 onclick（避免 \t/\n 等被 JS 转义破坏；Windows 下两种斜杠通用）
+    const r1a = esc(r1.replace(/\\/g, '/'));
+    const r2a = esc((r2 || '').replace(/\\/g, '/'));
+    const sendBtn = (page, label, tip) =>
+      `<button class="btn small" title="${tip}" onclick="sendTo('${page}', { r1: '${r1a}', r2: '${r2a}' })">${label}</button>`;
+    return `<div>📄 <a href="/downloads/${encodeURIComponent(bid)}/${encodeURIComponent((f.out||'').split(/[\\/]/).pop())}" download class="mono">${esc((f.out||'').split(/[\\/]/).pop())}</a> (${fmtBytes(f.size)})` +
+      `<span style="display:inline-flex;gap:4px;margin-left:8px;white-space:nowrap;vertical-align:middle">` +
+      sendBtn('samples', '🧾 样品', '发送到「样品创建」并预填 R1/R2') +
+      sendBtn('hostremoval', '🚫 去宿主', '发送到「宿主去除」并预填 R1/R2') +
+      sendBtn('fastp', '🧹 质控', '发送到「序列质控」并预填 R1/R2') +
+      sendBtn('identify', '🦠 鉴定', '发送到「病毒鉴定」并预填 R1/R2') +
+      `</span></div>`;
+  }).join('') || '<span class="hint">无文件</span>')
+    + `<p class="hint">共 ${all.length} 个文件 · 每页 ${PER_PAGE} 个</p>`
+    + pagerHtml(page, pages, `dlFileGo('${bid}',{p})`);
+}
+
+async function intoPipeline(bid) {
+  const project = prompt(t('dl.projPrompt', '项目分组名（留空不分组）'), '') || '';
+  const enqueue = confirm(t('dl.enqConfirm', '创建样品后直接加入批处理队列开始分析？\n（确定=入队分析；取消=只建样品稍后手动跑）'));
+  try {
+    const r = await fetch('/api/dl/to_pipeline', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ batch: bid, project: project || null, enqueue })});
+    const d = await r.json();
+    if (!r.ok) { alert((d.error) || '转入失败'); return; }
+    toast(t('dl.intoOk', '已转入分析流程'),
+          `${(d.created||[]).length} ${t('dl.samples', '个样品')}` +
+          (d.queued ? ` · ${t('dl.enqueued', '已入队')}` : '') +
+          (d.skipped && d.skipped.length ? ` · ${t('dl.skipped', '跳过已存在')}: ${d.skipped.join(', ')}` : ''),
+          {ttl: 8000});
+    if (!POP && d.created && d.created.length) {
+      setTimeout(() => location.href = '/pipeline?sample=' + encodeURIComponent(d.created[0]), 900);
+    }
+  } catch (e) { setConnBanner(true); }
+}
+
+async function batchAction(bid, action) {
+  const confirms = {
+    delete: '删除该下载批次的记录、日志与全部已下载文件？（不可恢复）',
+    delete_files: '只删除已下载的数据文件？\n批次记录与日志保留（列表仍显示，可追溯）。',
+    delete_record: '只删除批次记录与日志？\n已下载文件将保留在 downloads/ 磁盘原处，不再由平台管理。'
+  };
+  if (confirms[action] && !confirm(confirms[action])) return;
+  try {
+    const r = await fetch(`/api/dl/batch/${encodeURIComponent(bid)}/${action}`, {method: 'POST'});
+    if (!r.ok) alert((await r.json()).error || '操作失败');
+    refresh();
+  } catch (e) { setConnBanner(true); }
+}
+
+let refreshTimer = null;
+async function refresh() {
+  const box = $('batchList');
+  if (!box) return;
+  let active = false;
+  try {
+    const list = await (await fetch('/api/dl/batches')).json();
+    active = list.some(b => ['resolving','downloading','converting'].includes(b.status));
+    box.innerHTML = list.length ? list.map(batchHtml).join('')
+      : `<p class="hint">${t('dl.none', '暂无下载任务')}</p>`;
+    if (POP) document.title = `${t('dl.title')}（${list.filter(b => b.status === 'downloading').length}）`;
+  } catch (e) { setConnBanner(true); }
+  finally {
+    clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(refresh, active ? 2000 : 6000);
+  }
+}
+
+(async () => {
+  try {
+    const a2 = typeof aria2cOK !== 'undefined';
+  } catch (e) {}
+  // 引擎提示
+  try {
+    const r = await fetch('/api/tools');
+    const d = await r.json();
+    const el = $('dlEngine');
+    if (el) {
+      const a2 = d.tools && d.tools.aria2c;
+      const sc = d.tools && d.tools.sracha;
+      el.textContent =
+        (a2 ? '✔ aria2c 主引擎' : '⚠ aria2c 缺失（内置下载）') +
+        ' → 回退: ' + (sc ? '✔ sracha（仅 SRR/ERR/DRR）' : '内置 HTTP');
+    }
+  } catch (e) {}
+  refresh();
+})();
+</script>
+</body>
+</html>

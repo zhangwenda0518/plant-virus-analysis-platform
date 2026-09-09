@@ -1,0 +1,35 @@
+﻿diff --git a/kommon.c b/kommon.c
+index f97307b..0b55b63 100644
+--- a/kommon.c
++++ b/kommon.c
+@@ -340,6 +340,25 @@ double kom_percent_cpu(void)
+  * mmap loader *
+  ***************/
+ 
++#ifdef _WIN32
++/* Windows/mingw: no POSIX mmap. Provide the same API surface so that the
++ * rest of the code compiles unchanged; --mmap then fails loudly at load
++ * time instead of silently mapping nothing. The default (non-mmap) index
++ * loader, mb_idx_load(), is unaffected and fully functional. */
++void *kom_mmap_file(const char *fn, size_t *len, int preload)
++{
++	(void)fn; (void)preload;
++	*len = 0;
++	fprintf(stderr, "[W::kom_mmap_file] mmap is not supported on this platform; use the default index loader\n");
++	return 0;
++}
++
++int kom_munmap(void *base, size_t map_len)
++{
++	(void)base; (void)map_len;
++	return 0;
++}
++#else
+ #include <fcntl.h>
+ #include <unistd.h>
+ #include <sys/mman.h>
+@@ -372,3 +391,4 @@ int kom_munmap(void *base, size_t map_len) // a simple wrapper
+ {
+ 	return munmap(base, map_len);
+ }
++#endif

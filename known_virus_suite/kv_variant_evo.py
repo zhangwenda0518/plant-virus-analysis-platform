@@ -1,0 +1,1753 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+kv_variant_evo.py — 变异分析扩展三模块（分子谱 / 密度分布 / 群体遗传学）
+=========================================================================
+在 kv_variant_plot.py（位点图·效应谱·AF-DP 三联）之外，补齐三个模块的分析与出图：
+
+  模块 A  分子突变谱（Molecular spectrum）
+    A1  Ts/Tv 组成饼图（含 Ts/Tv 比值）
+    A2  等位频率谱 AFS（直方图 + KDE）
+    A3  按突变类型的 AF 分布（提琴 + 散点）
+    A4  突变景观 mutation landscape（位点均值 AF，颜色=Ts/Tv/Indel，点大小=样本数）
+
+  模块 B  变异密度与基因组分布（Variant density）
+    B1  沿基因组的 KDE 密度 + rug + 基因轨道
+    B2  滑动窗口变异计数热条（每窗口变异数，叠加基因轨道）
+
+  模块 C  群体遗传学（Population genetics）
+    C1  SNPGenie 每个 ORF 的 πN / πS / dN/dS（分组柱 + 比值标注）
+    C2  滑窗 π 与 Tajima's D（Pool-Seq 期望杂合度口径，双面板 + 基因轨道）
+
+  模块 D  SNPGenie 位点/密码子层变异（SNPGenie site & codon variation）
+    D1  逐位点变异类别分布（颜色=Syn/Nonsyn/noncoding，点大小=覆盖度）
+    D2  逐密码子 N/S 差异数（沿密码子位置）
+
+数据来源（全部来自变异段与既有产物，不重新跑 caller）:
+  <out>/vcf/{gid}.vcf                 每参考过滤后变异（INFO 含 DP/AD/DP4）
+  <out>/annotated/{gid}.ann.tsv       SnpEff 注释（Gene_Name/Annotation/Impact）
+  <out>/gbk_files/{gid}*.gb           GenBank（基因轨道 + GTF 生成）
+  <out>/virus-fasta/ref_{acc}/*.ref.fasta  单参考 FASTA（SNPGenie 输入）
+  <out>/variant_summary.json          变异段汇总（accession/genome 映射）
+
+输出:
+  <out>/variant_plots/{gid}_evo_spectrum.{png,pdf}     A1+A2+A3（三联）
+  <out>/variant_plots/{gid}_evo_landscape.{png,pdf}    A4
+  <out>/variant_plots/{gid}_evo_density.{png,pdf}      B1+B2
+  <out>/variant_plots/{gid}_evo_popgen.{png,pdf}       C1+C2
+  <out>/variant_plots/{gid}_evo_snpgenie.{png,pdf}    D1+D2
+  <out>/variant_evo/{gid}.snpgenie/                    SNPGenie 原始产物
+  <out>/variant_evo/{gid}_popgen_window.tsv            滑窗 π/Tajima's D 表
+  <out>/variant_evo/evo_manifest.json                  产物清单
+
+设计约束（大王 SCI 图偏好）:
+  白底；Okabe-Ito 色盲友好；300 dpi；pdf.fonttype 42；全英文标签；图例不遮挡
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import math
+import os
+import re
+import shutil
+import subprocess
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.lines import Line2D
+from matplotlib.patches import Rectangle
+
+# adjustText 为可选依赖：缺失时退化为无防重叠排版的纯文本标签
+try:
+    from adjustText import adjust_text as _adjust_text
+except Exception:  # noqa: BLE001
+    _adjust_text = None
+
+# 每张图最多标注的氨基酸标签数 / 标签显示的 AF 门槛
+MAX_AA_LABELS = 40
+AA_LABEL_AF_CUTOFF = 0.50
+
+
+def _is_nonsynonymous(row: dict) -> bool:
+    """判断注释行是否为非同义（改变蛋白序列）。"""
+    eff = (row.get('Annotation') or '').lower()
+    if not eff or 'synonymous' in eff:
+        return False
+    return any(k in eff for k in (
+        'missense', 'stop_gained', 'stop_lost', 'start_lost',
+        'frameshift', 'inframe_insertion', 'inframe_deletion',
+        'disruptive_inframe', 'conservative_inframe', 'initiator_codon',
+    ))
+
+
+def _clean_hgvsp(hgvsp: str) -> str:
+    """'p.Gln11Leu' -> 'Gln11Leu'；无法解析时返回空串。"""
+    if not hgvsp:
+        return ''
+    s = str(hgvsp).strip().split(',')[0].strip()
+    if s in ('', 'p.'):
+        return ''
+    if s.startswith('p.'):
+        s = s[2:]
+    s = s.replace('*', 'Ter')
+    if not re.fullmatch(r'[A-Za-z0-9]+', s):
+        return ''
+    return s
+
+plt.rcParams.update({
+    'pdf.fonttype': 42,
+    'ps.fonttype': 42,
+    'font.sans-serif': ['Arial', 'Helvetica', 'DejaVu Sans'],
+    'font.family': 'sans-serif',
+    'axes.unicode_minus': False,
+    'figure.facecolor': 'white',
+    'savefig.facecolor': 'white',
+    'savefig.dpi': 300,
+    'axes.linewidth': 0.8,
+    'axes.edgecolor': '#333333',
+    'xtick.major.width': 0.8,
+    'ytick.major.width': 0.8,
+})
+
+LOGGER = logging.getLogger('kv_variant_evo')
+
+OKABE_ITO = {
+    'orange': '#E69F00',
+    'sky': '#56B4E9',
+    'green': '#009E73',
+    'yellow': '#F0E442',
+    'blue': '#0072B2',
+    'vermillion': '#D55E00',
+    'purple': '#CC79A7',
+    'black': '#000000',
+    'grey': '#999999',
+}
+
+# 分子类型 → 配色（与 kv_variant_plot 的 Impact 配色体系并列，不冲突）
+MOL_COLOR = {
+    'Transition': OKABE_ITO['vermillion'],
+    'Transversion': OKABE_ITO['blue'],
+    'Indel': OKABE_ITO['orange'],
+    'Complex': OKABE_ITO['grey'],
+}
+MOL_ORDER = ['Transition', 'Transversion', 'Indel', 'Complex']
+
+IMPACT_COLOR = {
+    'HIGH': OKABE_ITO['vermillion'],
+    'MODERATE': OKABE_ITO['orange'],
+    'LOW': OKABE_ITO['sky'],
+    'MODIFIER': OKABE_ITO['grey'],
+}
+IMPACT_ORDER = ['HIGH', 'MODERATE', 'LOW', 'MODIFIER']
+
+_PLATFORM_ROOT = Path(__file__).resolve().parent.parent
+
+
+def safe_name(s) -> str:
+    return "".join(c if c.isalnum() or c in "._-" else "_" for c in str(s))
+
+
+def _style_axis(ax, hide_top_right=True):
+    if hide_top_right:
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+    ax.tick_params(labelsize=8, length=3)
+
+
+def _save(fig, out_dir: Path, stem: str, formats=('png', 'pdf')) -> list[str]:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    made = []
+    try:
+        for ext in formats:
+            p = out_dir / f'{stem}.{ext}'
+            fig.savefig(p, format=ext, dpi=300, bbox_inches='tight',
+                        facecolor='white')
+            made.append(str(p))
+    finally:
+        plt.close(fig)
+    return made
+
+
+# ── 共用解析 ────────────────────────────────────────────────────────
+_TS_PAIRS = ({'A', 'G'}, {'C', 'T'}, {'C', 'U'})
+
+
+def classify_molecular(ref: str, alt: str) -> str:
+    """Ts / Tv / Indel / Complex 四类。口径与参考管线 classify_molecular 一致。"""
+    ref, alt = str(ref).upper(), str(alt).upper()
+    if len(ref) != len(alt) or '+' in alt or '-' in alt:
+        return 'Indel'
+    if len(ref) != 1:
+        return 'Complex'
+    if {ref, alt} in _TS_PAIRS:
+        return 'Transition'
+    if ref in list('ACGT') and alt in list('ACGT'):
+        return 'Transversion'
+    return 'Complex'
+
+
+def load_genbank_genes(gb_path: Path, logger=None) -> tuple[list[dict], int]:
+    """解析 GenBank 的 CDS/gene 坐标与记录长度（复用 kv_plot.parse_gb_features）。"""
+    try:
+        from Bio import SeqIO
+    except ImportError:
+        if logger:
+            logger.warning('  Biopython 缺失，无法解析 GenBank')
+        return [], 0
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    try:
+        from kv_plot import parse_gb_features
+    except ImportError as e:
+        if logger:
+            logger.warning(f'  kv_plot 导入失败: {e}')
+        return [], 0
+    feats = parse_gb_features(str(gb_path), logger) or []
+    rec_len = 0
+    try:
+        rec_len = len(next(SeqIO.parse(str(gb_path), 'genbank')).seq)
+    except Exception as e:  # noqa: BLE001
+        if logger:
+            logger.warning(f'  {gb_path.name} 长度读取失败: {e}')
+    return feats, rec_len
+
+
+def genbank_cds_to_gtf(gb_path: Path, gtf_path: Path, strain: str = 'reference',
+                       logger=None) -> tuple[Path | None, list[dict]]:
+    """GenBank → SNPGenie 用 GTF（仅 CDS，非冗余 ORF）。
+
+    SNPGenie 要求基因是完整 ORF（长度 3 的倍数），且 CDS 记录不能重叠冗余。
+    这里只取 CDS feature：长度为 3 的倍数、且以终止密码子收尾或注释完整者。
+    返回 (gtf 路径 or None, cds 列表)。
+    """
+    try:
+        from Bio import SeqIO
+    except ImportError:
+        if logger:
+            logger.warning('  Biopython 缺失，无法生成 GTF')
+        return None, []
+    try:
+        rec = next(SeqIO.parse(str(gb_path), 'genbank'))
+    except Exception as e:  # noqa: BLE001
+        if logger:
+            logger.warning(f'  {gb_path.name} 解析失败: {e}')
+        return None, []
+
+    seq = str(rec.seq).upper()
+    cds_list = []
+    for f in rec.features:
+        if f.type != 'CDS':
+            continue
+        q = f.qualifiers
+        name = (q.get('gene', [''])[0] or q.get('product', [''])[0]
+                or q.get('locus_tag', [''])[0] or '')
+        name = str(name).strip()
+        if not name:
+            continue
+        try:
+            start = int(f.location.start)
+            end = int(f.location.end)
+        except (TypeError, ValueError):
+            continue
+        if end <= start:
+            continue
+        strand = '+' if (f.location.strand in (1, None)) else '-'
+        length = end - start
+        # 只保留完整 ORF：长度是 3 的倍数
+        # （拼接型 CDS 在病毒 GenBank 里极罕见，这里按连续区间处理）
+        if length % 3 != 0:
+            if logger:
+                logger.debug('  %s: CDS %s 长度 %d 非 3 倍数，跳过',
+                             gb_path.name, name, length)
+            continue
+        cds_list.append({'name': name, 'start': start, 'end': end,
+                         'strand': strand, 'length': length})
+    if not cds_list:
+        return None, []
+
+    # 按起点排序，去掉完全包含的冗余记录（同一 ORF 被重复注释）
+    cds_list.sort(key=lambda x: (x['start'], -x['length']))
+    kept = []
+    for c in cds_list:
+        if any(k['start'] <= c['start'] and c['end'] <= k['end']
+               and k is not c for k in kept):
+            continue
+        kept.append(c)
+
+    gtf_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = []
+    for c in kept:
+        gid = str(c['name']).replace('"', '').replace('\t', ' ')
+        lines.append(f'{strain}\tkv\tCDS\t{c["start"] + 1}\t{c["end"]}\t.\t'
+                     f'{c["strand"]}\t0\tgene_id "{gid}";')
+    gtf_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    if logger:
+        logger.info('  GTF 写入 %d 个 CDS -> %s', len(kept), gtf_path.name)
+    return gtf_path, kept
+
+
+def _decode_info(info: str, key: str):
+    for item in info.split(';'):
+        if item.startswith(key + '='):
+            return item[len(key) + 1:]
+        if item == key:
+            return True
+    return None
+
+
+def parse_vcf_variants(vcf_path: Path) -> list[dict]:
+    """读 VCF，带出 ALT_FREQ。
+
+    AF 取值按四层优先级递减（兼容不同 caller 的 INFO 字段布局；
+    注意这是「绘图用」的 AF 推导，与 SNPGenie 的 --vcfformat 无关）：
+      ① INFO/DP4  -> (fwd_alt+rev_alt)/(ref+alt)   bcftools、SNPGenie
+      ② INFO/AF   -> 直接取（越界则丢弃）            lofreq、freebayes 部分版本
+      ③ AO/(RO+AO) -> freebayes 观测计数
+      ④ AD[1]/DP  -> 样本级等位深度                bcftools 无 DP4 时
+    四层全缺时 AF=None。**不用 0 冒充缺值**：0 会被下游当作「该位点无变异」，
+    而 None 只在图上跳过该点，语义更诚实。
+    DP 单独兜底（即使 AF 为 None 也尽量给出），供滑窗 Tajima's D 的
+    有效样本量派生使用。
+    """
+    rows = []
+    with open(vcf_path, encoding='utf-8', errors='replace') as fh:
+        for line in fh:
+            if line.startswith('#') or not line.strip():
+                continue
+            f = line.rstrip('\n').split('\t')
+            if len(f) < 8:
+                continue
+            chrom, pos, _id, ref, alt, qual, filt, info = f[:8]
+            try:
+                pos_i = int(pos)
+            except ValueError:
+                continue
+            alt = alt.split(',')[0]
+            ref_ad = alt_ad = None
+            ad = _decode_info(info, 'AD')
+            if ad:
+                parts = str(ad).split(',')
+                if len(parts) >= 2:
+                    try:
+                        ref_ad, alt_ad = int(parts[0]), int(parts[1])
+                    except ValueError:
+                        ref_ad = alt_ad = None
+            dp4 = _decode_info(info, 'DP4')
+            fwd_ref = rev_ref = fwd_alt = rev_alt = None
+            if dp4:
+                p4 = str(dp4).split(',')
+                if len(p4) == 4:
+                    try:
+                        fwd_ref, rev_ref = int(p4[0]), int(p4[1])
+                        fwd_alt, rev_alt = int(p4[2]), int(p4[3])
+                    except ValueError:
+                        fwd_ref = rev_ref = fwd_alt = rev_alt = None
+            # AF 口径优先级：
+            #   ① DP4（bcftools/SNPGenie format 3 同口径）
+            #   ② INFO/AF（lofreq、freebayes 部分版本直接给等位频率）
+            #   ③ AO/(RO+AO)（freebayes 观测计数）
+            #   ④ AD[1]/DP（bcftools/lofreq 样本级等位深度）
+            # 四层递减，任何一层命中即停；全缺时 AF=None（下游按缺值处理，
+            # 不用 0 冒充，避免图上呈现为「无变异」）。
+            af = None
+            dp_eff = None
+            if None not in (fwd_ref, rev_ref, fwd_alt, rev_alt):
+                ref_c, alt_c = fwd_ref + rev_ref, fwd_alt + rev_alt
+                dp_eff = ref_c + alt_c
+                if dp_eff > 0:
+                    af = alt_c / dp_eff
+            if af is None:
+                info_af = _decode_info(info, 'AF')
+                if info_af is not None:
+                    try:
+                        cand = float(str(info_af).split(',')[0])
+                        if 0.0 <= cand <= 1.0:
+                            af = cand
+                    except (TypeError, ValueError):
+                        pass
+            if af is None:
+                ao = _decode_info(info, 'AO')
+                ro = _decode_info(info, 'RO')
+                if ao is not None:
+                    try:
+                        ao_i = sum(int(x) for x in str(ao).split(',') if x)
+                        ro_i = (sum(int(x) for x in str(ro).split(',') if x)
+                                if ro is not None else 0)
+                        if ao_i + ro_i > 0:
+                            af = ao_i / (ao_i + ro_i)
+                            dp_eff = ao_i + ro_i
+                    except (TypeError, ValueError):
+                        pass
+            if af is None:
+                dp = _decode_info(info, 'DP')
+                try:
+                    dp_i = int(dp) if dp is not None else None
+                except (TypeError, ValueError):
+                    dp_i = None
+                if alt_ad is not None and dp_i:
+                    af = alt_ad / dp_i
+                    dp_eff = dp_i
+            if dp_eff is None:
+                # DP 至少给出来，供滑窗 Tajima's D 的有效样本量使用
+                dp = _decode_info(info, 'DP')
+                try:
+                    dp_eff = int(dp) if dp is not None else None
+                except (TypeError, ValueError):
+                    dp_eff = None
+            try:
+                qual_f = float(qual)
+            except (TypeError, ValueError):
+                qual_f = None
+            rows.append({
+                'CHROM': chrom, 'POS': pos_i, 'REF': ref, 'ALT': alt,
+                'QUAL': qual_f, 'AF': af, 'DP': dp_eff, 'FILTER': filt,
+                'ALT_AD': alt_ad, 'REF_AD': ref_ad,
+                'Molecular_Type': classify_molecular(ref, alt),
+                'is_indel': len(ref) != len(alt),
+            })
+    return rows
+
+
+def load_ann(ann_path: Path) -> list[dict]:
+    rows = []
+    with open(ann_path, encoding='utf-8', errors='replace') as fh:
+        header = fh.readline().rstrip('\n').split('\t')
+        for line in fh:
+            if not line.strip():
+                continue
+            vals = line.rstrip('\n').split('\t')
+            vals += [''] * (len(header) - len(vals))
+            rows.append(dict(zip(header, vals)))
+    return rows
+
+
+def _ann_index_by_pos(ann_rows: list[dict]) -> dict[int, dict]:
+    """每个位点保留最严重的一条注释。"""
+    out: dict[int, dict] = {}
+    for r in ann_rows:
+        try:
+            pos = int(r['POS'])
+        except (TypeError, ValueError):
+            continue
+        prev = out.get(pos)
+        if prev is None:
+            out[pos] = r
+        else:
+            cur_i = (IMPACT_ORDER.index(r['Impact'])
+                     if r.get('Impact') in IMPACT_ORDER else 9)
+            prev_i = (IMPACT_ORDER.index(prev['Impact'])
+                      if prev.get('Impact') in IMPACT_ORDER else 9)
+            if cur_i < prev_i:
+                out[pos] = r
+    return out
+
+
+# ══════════════════════════════════════════════════════════════════
+# 模块 A：分子突变谱
+# ══════════════════════════════════════════════════════════════════
+def _panel_tstv(ax, variants, accession):
+    counts = defaultdict(int)
+    for v in variants:
+        counts[v['Molecular_Type']] += 1
+    order = [m for m in MOL_ORDER if counts.get(m)]
+    if not order:
+        ax.axis('off')
+        return None
+    vals = [counts[m] for m in order]
+    colors = [MOL_COLOR[m] for m in order]
+    wedges, _texts, autotexts = ax.pie(
+        vals, colors=colors, startangle=140, autopct='%1.1f%%',
+        wedgeprops={'edgecolor': 'white', 'linewidth': 1.0},
+        textprops={'fontsize': 7.5, 'color': 'white', 'fontweight': 'bold'})
+    for t in autotexts:
+        t.set_fontsize(7.5)
+    ts = counts.get('Transition', 0)
+    tv = counts.get('Transversion', 0)
+    ratio = f'{ts / tv:.2f}' if tv else 'n/a'
+    ax.set_title(f'A1  Ts/Tv = {ratio}', fontsize=9.5, fontweight='bold',
+                 loc='left', pad=2)
+    ax.legend(wedges, [f'{m} ({counts[m]})' for m in order],
+              fontsize=7, frameon=False, loc='upper center',
+              bbox_to_anchor=(0.5, 0.02), ncol=1, handletextpad=0.5)
+    return ratio
+
+
+def _panel_afs(ax, variants, accession):
+    afs = [v['AF'] for v in variants if v['AF'] is not None]
+    if not afs:
+        ax.axis('off')
+        return
+    bins = np.linspace(0, 1, 21)
+    ax.hist(afs, bins=bins, color=OKABE_ITO['purple'], alpha=0.80,
+            edgecolor='white', linewidth=0.6, zorder=2)
+    # KDE 叠线（无 scipy 时退回直方图轮廓）
+    try:
+        from scipy.stats import gaussian_kde  # noqa: PLC0415
+        if len(afs) > 2 and np.std(afs) > 1e-9:
+            kde = gaussian_kde(afs, bw_method=0.3)
+            xs = np.linspace(0, 1, 200)
+            ys = kde(xs) * len(afs) * (bins[1] - bins[0])
+            ax.plot(xs, ys, color=OKABE_ITO['black'], lw=1.2, zorder=3)
+    except Exception:  # noqa: BLE001
+        pass
+    ax.axvline(0.5, color='#999999', ls='--', lw=0.8, zorder=1)
+    ax.text(0.5, ax.get_ylim()[1] * 0.97, ' AF=0.5', fontsize=6.5,
+            color='#666666', va='top', ha='left')
+    ax.set_xlabel('Allele frequency', fontsize=8.5)
+    ax.set_ylabel('Count', fontsize=8.5)
+    ax.set_title(f'A2  AFS (n = {len(afs)})', fontsize=9.5,
+                 fontweight='bold', loc='left', pad=6)
+    _style_axis(ax)
+    ax.grid(axis='y', color='#EEEEEE', lw=0.5, zorder=0)
+    ax.set_axisbelow(True)
+
+
+def _panel_af_violin(ax, variants, accession):
+    groups = {}
+    for v in variants:
+        if v['AF'] is None:
+            continue
+        mt = v['Molecular_Type']
+        groups.setdefault(mt, []).append(v['AF'])
+    order = [m for m in MOL_ORDER if groups.get(m)]
+    if not order:
+        ax.axis('off')
+        return
+    data = [groups[m] for m in order]
+    parts = ax.violinplot(data, positions=range(len(order)),
+                          showextrema=False, widths=0.72)
+    for i, body in enumerate(parts['bodies']):
+        body.set_facecolor(MOL_COLOR[order[i]])
+        body.set_alpha(0.55)
+        body.set_edgecolor('white')
+    # 四分位 + 散点
+    rng = np.random.default_rng(42)
+    for i, vals in enumerate(data):
+        if not vals:
+            continue
+        q1, med, q3 = np.percentile(vals, [25, 50, 75])
+        ax.plot([i, i], [q1, q3], color='#333333', lw=1.4, zorder=4)
+        ax.plot([i], [med], marker='o', ms=3.6, color='white',
+                markeredgecolor='#333333', markeredgewidth=0.8, zorder=5,
+                linestyle='none')
+        jitter = rng.normal(0, 0.045, len(vals))
+        ax.scatter(i + jitter, vals, s=4.5, color='#333333', alpha=0.30,
+                   linewidths=0, zorder=3)
+    ax.set_xticks(range(len(order)))
+    ax.set_xticklabels([f'{m}\n(n={len(groups[m])})' for m in order],
+                       fontsize=7.5)
+    ax.set_ylim(-0.03, 1.03)
+    ax.set_ylabel('Allele frequency', fontsize=8.5)
+    ax.set_title('A3  AF by mutation type', fontsize=9.5, fontweight='bold',
+                 loc='left', pad=6)
+    _style_axis(ax)
+    ax.grid(axis='y', color='#EEEEEE', lw=0.5, zorder=0)
+    ax.set_axisbelow(True)
+
+
+def plot_molecular_spectrum(variants, ann_rows, accession, out_dir,
+                            formats=('png', 'pdf')) -> list[str]:
+    """模块 A 三联：Ts/Tv + AFS + AF violin。"""
+    if not variants:
+        return []
+    fig, axes = plt.subplots(1, 3, figsize=(13.2, 4.0),
+                             gridspec_kw={'width_ratios': [1.0, 1.0, 1.15],
+                                          'wspace': 0.32})
+    _panel_tstv(axes[0], variants, accession)
+    _panel_afs(axes[1], variants, accession)
+    _panel_af_violin(axes[2], variants, accession)
+    fig.suptitle(f'Molecular mutation spectrum — {accession}',
+                 fontsize=11.5, fontweight='bold', y=1.02)
+    return _save(fig, out_dir, f'{safe_name(accession)}_evo_spectrum', formats)
+
+
+def plot_mutation_landscape(variants, ann_rows, genes, accession, genome_len,
+                            out_dir, formats=('png', 'pdf'),
+                            label_af_cutoff=AA_LABEL_AF_CUTOFF,
+                            max_aa_labels=MAX_AA_LABELS) -> list[str]:
+    """模块 A4：突变景观。x=位置，y=均值 AF，颜色=分子类型，点大小=该位点变异数。
+
+    非同义位点的氨基酸变化（HGVS_p）在 AF 达阈时标注在点上方。
+    """
+    if not variants:
+        return []
+    by_pos = defaultdict(list)
+    for v in variants:
+        by_pos[v['POS']].append(v)
+
+    # 注释按 POS 建索引（一个位点可能多条 ANN，取最严重的一条）
+    _imp_idx = {'HIGH': 0, 'MODERATE': 1, 'LOW': 2, 'MODIFIER': 3}
+    ann_by_pos = {}
+    for r in ann_rows:
+        try:
+            p = int(r['POS'])
+        except (TypeError, ValueError):
+            continue
+        prev = ann_by_pos.get(p)
+        if prev is None or _imp_idx.get(r.get('Impact'), 9) < \
+                _imp_idx.get(prev.get('Impact'), 9):
+            ann_by_pos[p] = r
+
+    pos_x, pos_y, pos_c, pos_s = [], [], [], []
+    for pos, vs in sorted(by_pos.items()):
+        afs = [v['AF'] for v in vs if v['AF'] is not None]
+        if not afs:
+            continue
+        pos_x.append(pos)
+        pos_y.append(float(np.mean(afs)))
+        # 颜色取该位点分子类型（多条时取最常见）
+        mc = defaultdict(int)
+        for v in vs:
+            mc[v['Molecular_Type']] += 1
+        pos_c.append(max(mc, key=mc.get))
+        pos_s.append(len(vs))
+
+    has_genes = bool(genes)
+    if has_genes:
+        fig, (ax, axg) = plt.subplots(
+            2, 1, figsize=(9.8, 3.8), sharex=True,
+            gridspec_kw={'height_ratios': [3.1, 1], 'hspace': 0.12})
+    else:
+        fig, ax = plt.subplots(figsize=(9.8, 3.0))
+        axg = None
+
+    for x, y, c, s in zip(pos_x, pos_y, pos_c, pos_s):
+        ax.scatter(x, y, s=18 + 22 * min(s, 8), color=MOL_COLOR.get(c, OKABE_ITO['grey']),
+                   alpha=0.78, edgecolors='white', linewidths=0.45, zorder=3)
+
+    # 氨基酸标签：仅非同义且平均 AF 达阈
+    texts = []
+    pending = []  # (af, x, y, label)，用于按 AF 截断
+    for x, y in zip(pos_x, pos_y):
+        ann = ann_by_pos.get(x)
+        if not ann or not _is_nonsynonymous(ann):
+            continue
+        if y < label_af_cutoff:
+            continue
+        aa = _clean_hgvsp(ann.get('HGVS_p', ''))
+        if not aa:
+            continue
+        gene = (ann.get('Gene_Name') or '').strip()
+        lab = f'{gene}: {aa} ({y * 100:.0f}%)' if gene else f'{aa} ({y * 100:.0f}%)'
+        pending.append((y, x, y, lab))
+    # 标签数超上限时优先保留高 AF 位点（防拥挤）
+    if max_aa_labels and len(pending) > max_aa_labels:
+        pending = sorted(pending, key=lambda t: -t[0])[:max_aa_labels]
+    for _af, x, y, lab in pending:
+        texts.append(ax.text(x, y + 0.025, lab, fontsize=6.6,
+                             color='#222222', zorder=5,
+                             ha='center', va='bottom'))
+
+    ax.set_ylim(-0.04, 1.42)
+    ax.set_ylabel('Mean allele frequency', fontsize=8.5)
+    ax.set_title(f'{accession} — mutation landscape', fontsize=10.5,
+                 fontweight='bold', pad=8)
+    _style_axis(ax)
+    ax.grid(axis='y', color='#EEEEEE', lw=0.5, zorder=0)
+    ax.set_axisbelow(True)
+    handles = [Line2D([], [], marker='o', color=MOL_COLOR[m], linestyle='none',
+                      ms=5, markeredgecolor='white', label=m)
+               for m in MOL_ORDER if any(c == m for c in pos_c)]
+    if handles:
+        ax.legend(handles=handles, fontsize=7.5, frameon=False,
+                  loc='upper right', ncol=len(handles), handletextpad=0.4,
+                  columnspacing=1.0, bbox_to_anchor=(1.0, 1.14))
+
+    # 标签防重叠（adjustText 可用时）
+    if texts and _adjust_text is not None:
+        try:
+            _adjust_text(texts, ax=ax,
+                         arrowprops=dict(arrowstyle='-', color='#BBBBBB',
+                                         lw=0.6, alpha=0.7, shrinkA=2,
+                                         shrinkB=2),
+                         expand_points=(1.6, 1.6),
+                         expand_text=(1.2, 1.4),
+                         force_text=(0.5, 1.2), force_points=(0.3, 0.6),
+                         lim=400)
+        except Exception:  # noqa: BLE001
+            pass
+
+    if axg is not None:
+        _draw_gene_track(axg, genes, genome_len or max(pos_x))
+        axg.set_xlabel(f'Position along {accession} (nt)', fontsize=9)
+    else:
+        ax.set_xlabel(f'Position along {accession} (nt)', fontsize=9)
+    return _save(fig, out_dir, f'{safe_name(accession)}_evo_landscape', formats)
+
+
+# ══════════════════════════════════════════════════════════════════
+# 模块 B：变异密度与基因组分布
+# ══════════════════════════════════════════════════════════════════
+def _draw_gene_track(ax, genes, genome_len, fontsize=6.5):
+    """基因轨道：横向矩形 + 名称，Okabe-Ito 循环配色。
+
+    标签策略：矩形足够宽时把名称画在条内（最稳，不会被裁切也不会互相压叠），
+    过窄时画在条上方并在 ylim 留出顶部余量，避免最上面一行的标签被裁掉。
+    """
+    n = max(len(genes), 1)
+    gmax = max(float(genome_len or 0), 1.0)
+    # 顶部多留 0.55 行，供上方标签使用；否则最高一行的文字会越出 axes 被裁
+    ax.set_ylim(-0.5, max(n - 0.5, 0.5) + 0.55)
+    ax.set_yticks([])
+    ax.spines['left'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    _style_axis(ax, hide_top_right=False)
+    palette = [OKABE_ITO[k] for k in
+               ('blue', 'orange', 'green', 'purple', 'vermillion', 'sky')]
+    for i, g in enumerate(genes):
+        c = palette[i % len(palette)]
+        start, end = float(g['start']), float(g['end'])
+        width = max(end - start, 1.0)
+        ax.add_patch(Rectangle((start, i - 0.22), width, 0.44,
+                               facecolor=c, edgecolor='none', alpha=0.85))
+        name = str(g['name'])[:18]
+        # 条内放得下就放条内：约 1 字符需 1.9 个字符宽度的空间
+        char_frac = 0.0115 * fontsize / 6.5
+        fits_inside = (width / gmax) >= max(len(name) + 1, 3) * char_frac
+        if fits_inside:
+            ax.text(start + width / 2.0, i, name, fontsize=fontsize,
+                    color='white', va='center', ha='center',
+                    fontweight='bold', clip_on=False, zorder=5)
+        else:
+            ax.text(start, i + 0.30, name, fontsize=fontsize,
+                    color='#333333', va='bottom', ha='left',
+                    clip_on=False, zorder=5)
+    ax.set_xlim(0, gmax)
+
+
+def _kde_1d(x, grid, bw):
+    """高斯核密度（不依赖 scipy）。"""
+    if len(x) == 0:
+        return np.zeros_like(grid)
+    x = np.asarray(x, dtype=float)
+    diff = (grid[:, None] - x[None, :]) / bw
+    kern = np.exp(-0.5 * diff ** 2) / (bw * math.sqrt(2 * math.pi))
+    return kern.sum(axis=1) / len(x)
+
+
+def plot_variant_density(variants, genes, accession, genome_len, out_dir,
+                         formats=('png', 'pdf')) -> list[str]:
+    """模块 B：KDE 密度 + rug + 基因轨道；下层面板为滑窗变异计数。"""
+    if not variants:
+        return []
+    positions = [v['POS'] for v in variants]
+    genome_len = int(genome_len or max(positions))
+    if genome_len <= 0:
+        return []
+
+    has_genes = bool(genes)
+    n_rows = 3 if has_genes else 2
+    heights = [3.0, 1.5, 0.9] if has_genes else [3.0, 1.5]
+    fig, axes = plt.subplots(n_rows, 1, figsize=(9.8, 4.6 if has_genes else 3.8),
+                             sharex=True,
+                             gridspec_kw={'height_ratios': heights,
+                                          'hspace': 0.16})
+    ax_dens, ax_win = axes[0], axes[1]
+    axg = axes[2] if has_genes else None
+
+    # B1 密度
+    grid = np.linspace(0, genome_len, 600)
+    bw = max(genome_len / 120.0, 5.0)
+    dens = _kde_1d(positions, grid, bw)
+    ax_dens.fill_between(grid, dens, color=OKABE_ITO['green'], alpha=0.35,
+                         zorder=2)
+    ax_dens.plot(grid, dens, color=OKABE_ITO['green'], lw=1.3, zorder=3)
+    ax_dens.vlines(positions, 0, 0.06 * (dens.max() or 1),
+                   color=OKABE_ITO['black'], lw=0.4, alpha=0.22, zorder=1)
+    ax_dens.set_ylabel('Variant density', fontsize=8.5)
+    ax_dens.set_title(f'B1  {accession} — variant density (n = {len(variants)})',
+                      fontsize=10, fontweight='bold', loc='left', pad=6)
+    _style_axis(ax_dens)
+    ax_dens.grid(axis='y', color='#EEEEEE', lw=0.5, zorder=0)
+    ax_dens.set_axisbelow(True)
+
+    # B2 滑窗变异计数
+    n_win = max(20, min(80, len(variants) // 2 or 20))
+    edges = np.linspace(0, genome_len, n_win + 1)
+    counts, _ = np.histogram(positions, bins=edges)
+    widths = np.diff(edges)
+    centers = edges[:-1] + widths / 2
+    ax_win.bar(centers, counts, width=widths * 0.92,
+               color=OKABE_ITO['sky'], edgecolor='white', linewidth=0.3,
+               align='center', zorder=2)
+    ax_win.set_ylabel('Variants / window', fontsize=8)
+    ax_win.set_title(f'B2  Sliding-window variant count ({n_win} windows)',
+                     fontsize=9, fontweight='bold', loc='left', pad=4)
+    _style_axis(ax_win)
+    ax_win.grid(axis='y', color='#EEEEEE', lw=0.5, zorder=0)
+    ax_win.set_axisbelow(True)
+
+    if axg is not None:
+        _draw_gene_track(axg, genes, genome_len)
+        axg.set_xlabel(f'Position along {accession} (nt)', fontsize=9)
+    else:
+        ax_win.set_xlabel(f'Position along {accession} (nt)', fontsize=9)
+    return _save(fig, out_dir, f'{safe_name(accession)}_evo_density', formats)
+
+
+# ══════════════════════════════════════════════════════════════════
+# 模块 C：群体遗传学
+# ══════════════════════════════════════════════════════════════════
+def _snpgenie_exe() -> tuple[Path | None, Path | None]:
+    """定位 perl 与 snpgenie.pl。"""
+    perl = _PLATFORM_ROOT / 'tools' / 'strawberry-perl' / 'perl' / 'bin' / 'perl.exe'
+    script = _PLATFORM_ROOT / 'tools' / 'snpgenie' / 'snpgenie.pl'
+    if not perl.is_file():
+        w = shutil.which('perl')
+        perl = Path(w) if w else None
+    if not script.is_file():
+        return None, None
+    return perl, script
+
+
+def _clean_vcf_sample_names(vcf: Path, dst: Path,
+                            stem: str = 'SAMPLE') -> int:
+    """把 VCF 表头 #CHROM 行的样本列名换成干净标识，写到 dst。
+
+    动机（实测，2026-09-09）：平台的 VCF 样本列名是比对 BAM 的完整 Windows
+    路径（如 ``D:\\桌面\\...\\GQMIX.sorted.bam``）。SNPGenie 的 format 4 会
+    用样本名去建临时文件 ``temp_vcf4_<样本名>.vcf``，路径里的冒号/反斜杠让
+    Perl 建文件失败，于是报
+      ``## WARNING: Conflicting SNP Report formats detected.`` 并 rc=9。
+    仅重命名样本列 -> ``SAMPLE``（多个样本时 SAMPLE1/SAMPLE2...），
+    format 4 即可正常跑通，且数值与 format 3 在有意义的位点上出现预期差异
+    （format 3 会把非参考 reads 平均分给多个 ALT，format 4 用 AD 精确计数）。
+
+    返回改写的样本列数（0 表示表头无样本列，原样拷贝）。
+    """
+    raw = vcf.read_text(encoding='utf-8', errors='replace')
+    out_lines = []
+    n_samples = 0
+    for line in raw.splitlines(keepends=True):
+        if line.startswith('#CHROM'):
+            parts = line.rstrip('\r\n').split('\t')
+            if len(parts) > 9:
+                n = len(parts) - 9
+                new_names = ([stem] if n == 1 else
+                             [f'{stem}{i + 1}' for i in range(n)])
+                parts[9:] = new_names
+                n_samples = n
+            out_lines.append('\t'.join(parts) + '\n')
+        else:
+            out_lines.append(line)
+    if n_samples == 0:
+        shutil.copy2(vcf, dst)
+        return 0
+    dst.write_text(''.join(out_lines), encoding='utf-8', newline='')
+    return n_samples
+
+
+def run_snpgenie(fasta: Path, gtf: Path, vcf: Path, workdir_en: Path,
+                 outdir_name: str, logger=None, vcfformat: int = 4,
+                 minfreq: float | None = None,
+                 sliding_window: int | None = None,
+                 timeout: int = 900) -> Path | None:
+    """跑 SNPGenie。
+
+    硬约束（实测）:
+      - 工作目录必须是纯英文路径（中文路径下 Perl mkdir 静默失败）
+      - 必须显式传 --workdir（否则 perl 反引号 pwd 返回 MSYS 格式 /c/...）
+      - VCF 走 format 4（FORMAT/AD + DP + 样本列），因为平台 VCF 天然含
+        FORMAT/AD，而 format 4 是 SNPGenie README 标注的「最常用」且用 AD
+        精确计数；format 3（INFO/DP4）在同一位点多个 ALT 时会把非参考 reads
+        平均分给各 ALT，有已知偏倚。
+      - format 4 额外要求样本列名干净（见 _clean_vcf_sample_names），本函数
+        在拷贝进英文工作目录时自动清洗，原始 VCF 不被改动。
+    """
+    perl, script = _snpgenie_exe()
+    if perl is None or script is None:
+        if logger:
+            logger.warning('  SNPGenie 或 perl 未就绪，跳过群体遗传学分析')
+        return None
+    workdir_en = Path(workdir_en)
+    workdir_en.mkdir(parents=True, exist_ok=True)
+    # 把输入拷到英文工作目录（SNPGenie 对非 ASCII 路径敏感）
+    # src == dst 时（输入本就在工作目录）跳过拷贝，避免 WinError 32 自拷占用
+    for src in (fasta, gtf):
+        dst = workdir_en / src.name
+        try:
+            if src.resolve() != dst.resolve():
+                shutil.copy2(src, dst)
+        except OSError as e:
+            if logger:
+                logger.error('  复制 %s 到工作目录失败: %s', src.name, e)
+            return None
+    # VCF：目标路径 = 工作目录下的副本，format 4 时清洗样本列名
+    vcf_dst = workdir_en / vcf.name
+    try:
+        if vcfformat == 4:
+            # 清洗必须写入独立文件；若目标与源同路径则加 .clean 后缀，
+            # 避免边读边写覆盖原始 VCF。
+            if vcf.resolve() == vcf_dst.resolve():
+                vcf_dst = workdir_en / (vcf.stem + '.clean.vcf')
+            n = _clean_vcf_sample_names(vcf, vcf_dst)
+            if logger and n:
+                logger.info('  [SNPGenie] VCF 样本列名已清洗 (%d 列 -> SAMPLE)', n)
+        elif vcf.resolve() != vcf_dst.resolve():
+            shutil.copy2(vcf, vcf_dst)
+    except OSError as e:
+        if logger:
+            logger.error('  准备 VCF 到工作目录失败: %s', e)
+        return None
+    # SNPGenie 实际读取的 VCF 文件名
+    vcf_arg_name = vcf_dst.name
+    out_dir = workdir_en / outdir_name
+    if out_dir.exists():
+        shutil.rmtree(out_dir, ignore_errors=True)
+    args = [str(perl), str(script),
+            f'--fastafile={fasta.name}',
+            f'--gtffile={gtf.name}',
+            f'--snpreport={vcf_arg_name}',
+            f'--vcfformat={vcfformat}',
+            f'--workdir={workdir_en}',
+            f'--outdir={outdir_name}']
+    if minfreq is not None:
+        args.append(f'--minfreq={minfreq}')
+    if sliding_window:
+        args.append(f'--slidingwindow={sliding_window}')
+    if logger:
+        logger.info('  [SNPGenie] %s (%s)', vcf.name, ' '.join(args[2:]))
+    try:
+        p = subprocess.run(args, cwd=str(workdir_en), capture_output=True,
+                           text=True, encoding='utf-8', errors='replace',
+                           timeout=timeout)
+    except subprocess.TimeoutExpired:
+        if logger:
+            logger.warning('  SNPGenie 超时 (%ds)', timeout)
+        return None
+    except OSError as e:
+        if logger:
+            logger.warning('  SNPGenie 启动失败: %s', e)
+        return None
+    if p.returncode != 0 or not (out_dir / 'population_summary.txt').exists():
+        tail = ((p.stderr or '') + (p.stdout or '')).strip().splitlines()[-6:]
+        if logger:
+            logger.warning('  SNPGenie 失败 (rc=%d): %s', p.returncode,
+                           ' | '.join(tail))
+        return None
+    return out_dir
+
+
+def annotate_orf_variant_counts(prod_rows: list[dict], cds: list[dict],
+                                variants: list[dict]) -> list[dict]:
+    """给 SNPGenie 每条 ORF 行补 N_VARIANTS_IN_ORF / ORF_COVERED 字段。
+
+    动机：product_results.txt 里 N_diffs=S_diffs=0 有两种完全不同的含义——
+      ① 该 ORF 确实无变异（ORF 内有变异位点，但都是 NONREF_NONPOLY）
+      ② 该 ORF 区域内根本没有变异被调用（可能是没有覆盖，或真的保守）
+    单看 SNPGenie 原表无法区分。这里用 VCF 位点与 CDS 坐标求交：
+      N_VARIANTS_IN_ORF = 落在该 ORF 坐标内的变异位点数
+      ORF_COVERED       = 该 ORF 是否被任何变异位点触及
+    两者均为 0/False 时，页面上把它标为「无变异检出」而不是「无多态」，
+    措辞更保守，也不会把「没覆盖」说成「不分化」。
+    """
+    if not prod_rows:
+        return prod_rows
+    pos_list = sorted({int(v['POS']) for v in variants})
+    if not pos_list:
+        for r in prod_rows:
+            r['N_VARIANTS_IN_ORF'] = 0
+            r['ORF_COVERED'] = False
+        return prod_rows
+
+    # ORF 坐标：CDS 列表来自 genbank_cds_to_gtf（0-based 闭区间），
+    # 这里换算成 1-based 闭区间与 VCF POS 对齐。
+    spans = {}
+    for c in cds:
+        name = str(c.get('name', '')).strip('"')
+        if name:
+            spans[name] = (int(c['start']) + 1, int(c['end']))
+
+    import bisect
+
+    def _count(span):
+        lo, hi = span
+        left = bisect.bisect_left(pos_list, lo)
+        right = bisect.bisect_right(pos_list, hi)
+        return max(0, right - left)
+
+    # 名字命中率：SNPGenie 的 product 列直接回写 GTF 的 gene_id，实测完全匹配。
+    # 若上游注释或 SNPGenie 版本改写了名字，退到位序对应（GTF 行序 == cds 列表序）。
+    n_name_hit = sum(1 for r in prod_rows
+                     if str(r.get('product', '')).strip('"') in spans)
+    ordered = [c for c in cds if str(c.get('name', '')).strip('"')]
+    use_positional = (n_name_hit == 0 and len(prod_rows) == len(ordered))
+
+    for idx, r in enumerate(prod_rows):
+        name = str(r.get('product', '')).strip('"')
+        span = spans.get(name)
+        if span is None and use_positional:
+            c = ordered[idx]
+            span = (int(c['start']) + 1, int(c['end']))
+        if span is None:
+            # 既对不上名字，位序也对不齐：宁可留空，不谎报为“已覆盖/未多态”
+            r['N_VARIANTS_IN_ORF'] = ''
+            r['ORF_COVERED'] = ''
+            continue
+        n_in = _count(span)
+        r['N_VARIANTS_IN_ORF'] = n_in
+        r['ORF_COVERED'] = n_in > 0
+    return prod_rows
+
+
+def _write_product_annotated(out_dir: Path, rows: list[dict]) -> Path | None:
+    """把带 ORF 变异计数的汇总写成 product_results.annotated.txt。
+
+    不覆盖 SNPGenie 原产物（product_results.txt），保持上游输出现状，
+    新增列单独落一个文件，下游（app.py）优先读它；回退时仍能读原文件。
+    """
+    if not rows:
+        return None
+    cols = list(rows[0].keys())
+    dest = Path(out_dir) / 'product_results.annotated.txt'
+    try:
+        with open(dest, 'w', encoding='utf-8') as fh:
+            fh.write('\t'.join(cols) + '\n')
+            for r in rows:
+                fh.write('\t'.join(str(r.get(c, '')) for c in cols) + '\n')
+    except OSError:
+        return None
+    return dest
+
+
+def read_snpgenie_product(out_dir: Path) -> list[dict]:
+    """读 product_results（优先带 ORF 变异计数的注释版）。"""
+    base = Path(out_dir)
+    for name in ('product_results.annotated.txt', 'product_results.txt'):
+        f = base / name
+        if not f.is_file():
+            continue
+        rows = []
+        with open(f, encoding='utf-8', errors='replace') as fh:
+            header = fh.readline().rstrip('\n').split('\t')
+            for line in fh:
+                if not line.strip():
+                    continue
+                vals = line.rstrip('\n').split('\t')
+                vals += [''] * (len(header) - len(vals))
+                rows.append(dict(zip(header, vals)))
+        return rows
+    return []
+
+
+def _f(x):
+    try:
+        v = float(x)
+        return v if math.isfinite(v) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _panel_snpgenie_bars(ax, prod_rows, accession):
+    """C1：每 ORF 的 πN / πS 分组柱 + dN/dS 标注。"""
+    items = []
+    for r in prod_rows:
+        gene = (r.get('product') or '').strip()
+        pin, pis = _f(r.get('piN')), _f(r.get('piS'))
+        if not gene or pin is None or pis is None:
+            continue
+        items.append({'gene': gene, 'piN': pin, 'piS': pis,
+                      'dN': _f(r.get('mean_dN_vs_ref')),
+                      'dS': _f(r.get('mean_dS_vs_ref')),
+                      'N_sites': _f(r.get('N_sites')),
+                      'S_sites': _f(r.get('S_sites'))})
+    if not items:
+        ax.axis('off')
+        ax.text(0.5, 0.55, 'C1  SNPGenie: no coding ORF\n(viroid / no CDS)',
+                ha='center', va='center', fontsize=9, color='#666666',
+                transform=ax.transAxes)
+        return []
+    items.sort(key=lambda d: d['gene'])
+    x = np.arange(len(items))
+    w = 0.38
+    ax.bar(x - w / 2, [d['piN'] for d in items], width=w,
+           color=OKABE_ITO['vermillion'], edgecolor='white', linewidth=0.5,
+           label=r'$\pi_N$', zorder=3)
+    ax.bar(x + w / 2, [d['piS'] for d in items], width=w,
+           color=OKABE_ITO['blue'], edgecolor='white', linewidth=0.5,
+           label=r'$\pi_S$', zorder=3)
+    for i, d in enumerate(items):
+        # πN/πS 比值标注在柱子顶端
+        denom = d['piS'] or 0.0
+        ratio = (d['piN'] / denom) if denom > 0 else float('inf')
+        ymax = max(d['piN'], d['piS'])
+        txt = (f'{ratio:.2f}' if math.isfinite(ratio) else 'n/a')
+        ax.text(i, ymax * 1.04 if ymax > 0 else 0.0001,
+                f'ω={txt}', ha='center', va='bottom', fontsize=7,
+                color='#333333')
+    ax.set_xticks(x)
+    ax.set_xticklabels([d['gene'][:16] for d in items], fontsize=7.5,
+                       rotation=30, ha='right')
+    ax.set_ylabel(r'$\pi_N$ / $\pi_S$', fontsize=9)
+    ax.set_title('C1  SNPGenie per-ORF diversity', fontsize=9.5,
+                 fontweight='bold', loc='left', pad=6)
+    _style_axis(ax)
+    ax.legend(fontsize=7.5, frameon=False, loc='upper right')
+    ax.grid(axis='y', color='#EEEEEE', lw=0.5, zorder=0)
+    ax.set_axisbelow(True)
+    return items
+
+
+def tajimas_d(n: int, n_variants: int, pi_window: float):
+    """Tajima's D（Pool-Seq 口径，与参考管线 _compute_tajimas_d 同式）。
+
+    注意：n < 4 时方差项退化为 0（e1=e2=0），D 数学上无定义，返回 None。
+    这是公式本身的性质，不是实现缺陷：Tajima's D 需要至少 4 个取样序列
+    才有非零方差；单样本数据必须借 Pool-Seq 的测序深度作为有效样本量。
+    """
+    if n_variants < 3 or n < 4:
+        return None
+    a1 = sum(1.0 / i for i in range(1, n))
+    a2 = sum(1.0 / (i ** 2) for i in range(1, n))
+    b1 = (n + 1.0) / (3.0 * (n - 1.0))
+    b2 = (2.0 * (n ** 2 + n + 3.0)) / (9.0 * n * (n - 1.0))
+    c1 = b1 - 1.0 / a1
+    c2 = b2 - (n + 2.0) / (a1 * n) + (a2 / (a1 ** 2))
+    e1 = c1 / a1
+    e2 = c2 / (a1 ** 2 + a2)
+    v = e1 * n_variants + e2 * n_variants * (n_variants - 1.0)
+    if v <= 1e-10:
+        return None
+    return (pi_window - (n_variants / a1)) / math.sqrt(v)
+
+
+def compute_popgen_windows(variants, n_samples: int, genome_len: int,
+                           win: int = 0, step: int = 0) -> list[dict]:
+    """Pool-Seq 期望杂合度 π 与 Tajima's D 的滑窗统计。
+
+    π_site = (1 - Σp_i²)·n/(n-1)，p 为样本内该位点各等位频率均值。
+
+    有效样本量 n：单样本 VCF（本平台常态）下 n_samples=1，此时用该窗口内
+    变异位点的平均测序深度作为 Pool-Seq 有效样本量；深度 < 4 的窗口
+    Tajima's D 无定义（公式方差项退化为 0），表中留空并在 N_EFF 列标注。
+    """
+    if not variants:
+        return []
+    max_pos = int(genome_len or max(v['POS'] for v in variants))
+    if win <= 0 or step <= 0:
+        step = max(50, max_pos // 50) if max_pos > 500 else 25
+        win = step * 2
+    use_depth_n = n_samples < 4
+
+    # 位点级 π（同时带出该位点深度）
+    by_pos = defaultdict(list)
+    for v in variants:
+        by_pos[v['POS']].append(v)
+    site_pi = {}
+    site_dp = {}
+    for pos, vs in by_pos.items():
+        # 每条变异的 AF 视为该等位在群体中的频率估计；同一位置多 ALT 时求和
+        p_alts = [v['AF'] for v in vs if v['AF'] is not None]
+        if not p_alts:
+            continue
+        p_sum = min(sum(p_alts), 1.0)
+        p_ref = max(0.0, 1.0 - p_sum)
+        sum_sq = p_ref ** 2 + sum(p ** 2 for p in p_alts)
+        n_here = n_samples
+        if use_depth_n:
+            dps = [v['DP'] for v in vs if v.get('DP')]
+            n_here = int(round(sum(dps) / len(dps))) if dps else 2
+        n_eff = max(n_here, 1)
+        pi_site = (1.0 - sum_sq) * (n_eff / (n_eff - 1.0)) if n_eff > 1 else 0.0
+        site_pi[pos] = pi_site
+        site_dp[pos] = n_here
+    if not site_pi:
+        return []
+
+    results = []
+    pos_arr = np.array(sorted(site_pi))
+    pi_arr = np.array([site_pi[p] for p in pos_arr])
+    dp_arr = np.array([site_dp[p] for p in pos_arr], dtype=float)
+    for start in range(1, max_pos + 1, step):
+        end = start + win - 1
+        mask = (pos_arr >= start) & (pos_arr <= end)
+        s = int(mask.sum())
+        pi_w = float(pi_arr[mask].sum()) if s else 0.0
+        if use_depth_n:
+            n_eff = int(round(dp_arr[mask].mean())) if s else 0
+        else:
+            n_eff = n_samples
+        results.append({
+            'BIN_START': start, 'BIN_END': end,
+            'BIN_MID': (start + end) / 2.0,
+            'N_VARIANTS': s, 'PI': pi_w,
+            'N_EFF': n_eff,
+            'TAJIMA_D': tajimas_d(n_eff, s, pi_w),
+        })
+    return results
+
+
+def _panel_popgen(ax_pi, ax_d, win_rows, accession):
+    """C2：滑窗 π 与 Tajima's D。"""
+    rows = [r for r in win_rows if r['N_VARIANTS'] > 0]
+    if not rows:
+        ax_pi.axis('off')
+        ax_d.axis('off')
+        return
+    xs = [r['BIN_MID'] for r in rows]
+    pis = [r['PI'] for r in rows]
+    ax_pi.plot(xs, pis, color=OKABE_ITO['vermillion'], lw=1.4, zorder=3)
+    ax_pi.fill_between(xs, pis, color=OKABE_ITO['vermillion'], alpha=0.20,
+                       zorder=2)
+    ax_pi.set_ylabel(r'$\pi$ (window sum)', fontsize=9, fontweight='bold')
+    ax_pi.set_title('C2  Sliding-window diversity and neutrality',
+                    fontsize=9.5, fontweight='bold', loc='left', pad=6)
+    _style_axis(ax_pi)
+    ax_pi.grid(color='#EEEEEE', lw=0.5, zorder=0)
+    ax_pi.set_axisbelow(True)
+
+    ds = [(r['BIN_MID'], r['TAJIMA_D']) for r in rows
+          if r['TAJIMA_D'] is not None]
+    if ds:
+        dx, dy = zip(*ds)
+        ax_d.plot(dx, dy, color=OKABE_ITO['blue'], lw=1.3, marker='o',
+                  ms=3.0, zorder=3)
+        ax_d.axhline(0, color='#333333', ls='--', lw=1.0, zorder=2)
+        dmin = min(dy)
+        if dmin < -1.5:
+            ax_d.axhspan(dmin, -1.5, color=OKABE_ITO['orange'], alpha=0.10,
+                         zorder=1)
+            ax_d.text(ax_d.get_xlim()[0], -1.5, ' D < -1.5',
+                      fontsize=6.5, color='#8a5a00', va='bottom')
+        n_med = int(np.median([r['N_EFF'] for r in rows
+                               if r['TAJIMA_D'] is not None]))
+        ax_d.set_title(f"neff = mean depth (median {n_med})", fontsize=7.5,
+                       loc='right', color='#555555', pad=4)
+    else:
+        ax_d.text(0.5, 0.5,
+                  "Tajima's D undefined\n(need >= 3 variants and n >= 4)",
+                  ha='center', va='center', fontsize=8, color='#666666',
+                  transform=ax_d.transAxes)
+    ax_d.set_ylabel(r"Tajima's $D$", fontsize=9.5, fontweight='bold')
+    _style_axis(ax_d)
+    ax_d.grid(color='#EEEEEE', lw=0.5, zorder=0)
+    ax_d.set_axisbelow(True)
+
+
+def read_snpgenie_sites(out_dir: Path) -> list[dict]:
+    """读 SNPGenie site_results.txt（逐位点多样性 / 变异类别）。"""
+    f = Path(out_dir) / 'site_results.txt'
+    if not f.is_file():
+        return []
+    rows = []
+    with open(f, encoding='utf-8', errors='replace') as fh:
+        header = fh.readline().rstrip('\n').split('\t')
+        for line in fh:
+            if not line.strip():
+                continue
+            vals = line.rstrip('\n').split('\t')
+            vals += [''] * (len(header) - len(vals))
+            rows.append(dict(zip(header, vals)))
+    return rows
+
+
+def read_snpgenie_codons(out_dir: Path) -> list[dict]:
+    """读 SNPGenie codon_results.txt（逐密码子 N/S 位点与差异数）。"""
+    f = Path(out_dir) / 'codon_results.txt'
+    if not f.is_file():
+        return []
+    rows = []
+    with open(f, encoding='utf-8', errors='replace') as fh:
+        header = fh.readline().rstrip('\n').split('\t')
+        for line in fh:
+            if not line.strip():
+                continue
+            vals = line.rstrip('\n').split('\t')
+            vals += [''] * (len(header) - len(vals))
+            rows.append(dict(zip(header, vals)))
+    return rows
+
+
+# 变异类别 -> 配色（与 SNPGenie 的 class_vs_ref 取值对应）
+SNP_CLASS_COLOR = {
+    'Synonymous': OKABE_ITO['blue'],
+    'Nonsynonymous': OKABE_ITO['vermillion'],
+    'noncoding': OKABE_ITO['grey'],
+}
+SNP_CLASS_ORDER = ['Synonymous', 'Nonsynonymous', 'noncoding']
+
+
+def plot_snpgenie_sites(site_rows, codon_rows, genes, accession, genome_len,
+                        out_dir, formats=('png', 'pdf')) -> list[str]:
+    """模块 D：SNPGenie 逐位点变异类别分布 + 逐密码子 N/S 多态性。
+
+    D1  位点沿基因组的标记条（颜色=Synonymous/Nonsynonymous/noncoding），
+        点大小=观测覆盖度；叠基因轨道。回答「非同义变异是否均匀分布」。
+    D2  逐密码子 N_diffs_vs_ref / S_diffs_vs_ref 柱状（沿密码子位置），
+        看清突变在密码子层面的同/非同义偏好。
+
+    数据源：<snpgenie>/site_results.txt 与 codon_results.txt。
+    无数据时返回 []（上游据此不计数）。
+    """
+    # ── 整理位点 ──
+    sites = []
+    for r in site_rows or []:
+        pos = _f(r.get('site'))
+        if pos is None:
+            continue
+        cls = (r.get('class_vs_ref') or '').strip() or 'noncoding'
+        if cls not in SNP_CLASS_COLOR:
+            cls = 'noncoding'
+        sites.append({'pos': int(pos), 'cls': cls,
+                      'cov': _f(r.get('coverage')) or 0.0,
+                      'pi': _f(r.get('pi')) or 0.0,
+                      'gdiv': _f(r.get('gdiv')) or 0.0,
+                      'product': (r.get('product') or '').strip()})
+    if not sites:
+        return []
+
+    # ── 整理密码子 ──
+    codons = []
+    for r in codon_rows or []:
+        pos = _f(r.get('site'))
+        if pos is None:
+            continue
+        nd, sd = _f(r.get('N_diffs_vs_ref')), _f(r.get('S_diffs_vs_ref'))
+        if (nd or 0) == 0 and (sd or 0) == 0:
+            continue                      # 只保留有多态性的密码子
+        codons.append({'pos': int(pos), 'N': nd or 0.0, 'S': sd or 0.0})
+
+    has_codon = bool(codons)
+    n_rows = 3 if genes else 2
+    heights = [1.45, 1.45] + ([0.75] if genes else [])
+    fig = plt.figure(figsize=(11.6, 6.6 if genes else 5.6))
+    gs = fig.add_gridspec(n_rows, 1, height_ratios=heights, hspace=0.42)
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax2 = fig.add_subplot(gs[1, 0], sharex=ax1)
+    axg = fig.add_subplot(gs[2, 0], sharex=ax1) if genes else None
+
+    # ── D1 位点条带（按类别分层，避免叠在一起看不清）──
+    lanes = {c: i for i, c in enumerate(SNP_CLASS_ORDER)}
+    counts = {c: 0 for c in SNP_CLASS_ORDER}
+    for s in sites:
+        y = lanes[s['cls']]
+        counts[s['cls']] += 1
+        ax1.scatter(s['pos'], y, s=30 + min(s['cov'], 40) * 6.0,
+                    color=SNP_CLASS_COLOR[s['cls']], edgecolor='white',
+                    linewidth=0.6, alpha=0.85, zorder=3)
+    # 覆盖度图例（点大小），仅当覆盖度有差异时加
+    covs = [s['cov'] for s in sites if s['cov'] > 0]
+    if covs and (max(covs) - min(covs)) >= 2:
+        lo, hi = int(min(covs)), int(max(covs))
+        for frac, xx in ((0.0, 0.62), (1.0, 0.80)):
+            cv = lo + (hi - lo) * frac
+            ax1.scatter(genome_len * xx, len(SNP_CLASS_ORDER) - 0.55,
+                        s=30 + min(cv, 40) * 6.0, color='#666666',
+                        edgecolor='white', linewidth=0.6, zorder=5)
+            ax1.text(genome_len * (xx + 0.022),
+                     len(SNP_CLASS_ORDER) - 0.55, f'{int(cv)}x',
+                     fontsize=7, va='center', color='#666666', zorder=5)
+    for c, y in lanes.items():
+        if counts[c]:
+            ax1.text(genome_len * 1.012, y, f"n={counts[c]}",
+                     fontsize=7.5, va='center', ha='left',
+                     color=SNP_CLASS_COLOR[c])
+    ax1.set_yticks([lanes[c] for c in SNP_CLASS_ORDER if counts[c]])
+    ax1.set_yticklabels([c for c in SNP_CLASS_ORDER if counts[c]], fontsize=8)
+    ax1.set_ylim(-0.6, len(SNP_CLASS_ORDER) - 0.1)
+    ax1.set_xlim(0, genome_len)
+    ax1.set_ylabel('SNP class (vs. reference)', fontsize=8.5)
+    ax1.set_title('D1  SNPGenie per-site variant classes '
+                  '(marker size = read coverage)', fontsize=9.5,
+                  fontweight='bold', loc='left', pad=6)
+    _style_axis(ax1)
+    ax1.grid(axis='x', color='#EEEEEE', lw=0.5, zorder=0)
+    ax1.set_axisbelow(True)
+    handles = [Line2D([], [], marker='o', linestyle='', markersize=6,
+                      color=SNP_CLASS_COLOR[c], markeredgecolor='white',
+                      label=c)
+               for c in SNP_CLASS_ORDER if counts[c]]
+    if handles:
+        ax1.legend(handles=handles, fontsize=7.5, frameon=False,
+                   loc='upper left', ncol=len(handles))
+
+    # ── D2 逐密码子 N/S 多态性柱状 ──
+    if has_codon:
+        xs = np.array([c['pos'] for c in codons], dtype=float)
+        ns = np.array([c['N'] for c in codons], dtype=float)
+        ss = np.array([c['S'] for c in codons], dtype=float)
+        ax2.vlines(xs, 0, ns, color=OKABE_ITO['vermillion'], lw=1.6,
+                   alpha=0.9, zorder=3)
+        ax2.scatter(xs, ns, s=16, color=OKABE_ITO['vermillion'], zorder=4,
+                    edgecolor='white', linewidth=0.4,
+                    label=r'$N$ differences vs. ref')
+        ax2.scatter(xs, ss, s=16, color=OKABE_ITO['blue'], marker='s',
+                    zorder=4, edgecolor='white', linewidth=0.4,
+                    label=r'$S$ differences vs. ref')
+        ymax = max(np.max(ns), np.max(ss), 1.0)
+        ax2.set_ylim(0, ymax * 1.22)
+        ax2.set_ylabel('Differences per codon', fontsize=8.5)
+        ax2.legend(fontsize=7.5, frameon=False, loc='upper right')
+    else:
+        ax2.axis('off')
+        ax2.text(0.5, 0.5, 'D2  no polymorphic codon',
+                 ha='center', va='center', fontsize=9, color='#666666',
+                 transform=ax2.transAxes)
+    ax2.set_title('D2  SNPGenie per-codon N/S differences', fontsize=9.5,
+                  fontweight='bold', loc='left', pad=6)
+    _style_axis(ax2)
+    ax2.grid(axis='y', color='#EEEEEE', lw=0.5, zorder=0)
+    ax2.set_axisbelow(True)
+
+    if axg is not None:
+        _draw_gene_track(axg, genes, genome_len)
+    ax2.set_xlabel(f'Position along {accession} (nt)', fontsize=8.5)
+
+    n_nonsyn = counts.get('Nonsynonymous', 0)
+    n_syn = counts.get('Synonymous', 0)
+    ratio = (n_nonsyn / n_syn) if n_syn else float('nan')
+    ratio_s = f'{ratio:.3f}' if math.isfinite(ratio) else 'n/a'
+    fig.suptitle(f'SNPGenie site- and codon-level variation — {accession}'
+                 f'   (N/S = {ratio_s})',
+                 fontsize=12, fontweight='bold', y=0.985)
+    return _save(fig, out_dir, f'{safe_name(accession)}_evo_snpgenie', formats)
+
+
+def plot_popgen(variants, genes, accession, genome_len, n_samples, out_dir,
+                prod_rows=None, formats=('png', 'pdf')) -> list[str]:
+
+    """模块 C：SNPGenie 每 ORF 多样性 + 滑窗 π/Tajima's D（可选基因轨道）。"""
+    win_rows = compute_popgen_windows(variants, n_samples, genome_len)
+    if not win_rows and not prod_rows:
+        return []
+    # 滑窗表落盘（供下游/审计）
+    evo_dir = out_dir.parent / 'variant_evo'
+    evo_dir.mkdir(parents=True, exist_ok=True)
+    if win_rows:
+        tsv = evo_dir / f'{safe_name(accession)}_popgen_window.tsv'
+        with open(tsv, 'w', encoding='utf-8') as fh:
+            fh.write('BIN_START\tBIN_END\tBIN_MID\tN_VARIANTS\tN_EFF\tPI\t'
+                     'TAJIMA_D\n')
+            for r in win_rows:
+                d = '' if r['TAJIMA_D'] is None else f"{r['TAJIMA_D']:.6f}"
+                fh.write(f"{r['BIN_START']}\t{r['BIN_END']}\t{r['BIN_MID']:.1f}\t"
+                         f"{r['N_VARIANTS']}\t{r['N_EFF']}\t{r['PI']:.8f}\t{d}\n")
+
+    has_genes = bool(genes)
+    n_rows = 3 if has_genes else 2
+    heights = [1.7, 1.7, 0.75] if has_genes else [1.7, 1.7]
+    fig = plt.figure(figsize=(11.6, 7.4))
+    gs = fig.add_gridspec(n_rows + 1, 2,
+                          height_ratios=heights + [0.35],
+                          width_ratios=[1.0, 1.0],
+                          hspace=0.46, wspace=0.24)
+    ax_c1 = fig.add_subplot(gs[0, 0])
+    ax_pi = fig.add_subplot(gs[0, 1])
+    ax_d = fig.add_subplot(gs[1, 1], sharex=ax_pi)
+    if has_genes:
+        axg = fig.add_subplot(gs[2, :], sharex=ax_pi)
+    else:
+        axg = None
+    # 左下角留给 C1 的图注/统计
+    ax_info = fig.add_subplot(gs[1, 0])
+    ax_info.axis('off')
+
+    items = _panel_snpgenie_bars(ax_c1, prod_rows or [], accession)
+    _panel_popgen(ax_pi, ax_d, win_rows, accession)
+    ax_pi.set_xlabel(f'Position along {accession} (nt)', fontsize=8.5)
+
+    if items:
+        lines = [f"ORFs analysed: {len(items)}"]
+        for d in items[:6]:
+            ds = d['dS'] or 0.0
+            om = (d['dN'] / ds) if ds > 0 else float('nan')
+            om_s = f'{om:.2f}' if math.isfinite(om) else 'n/a'
+            lines.append(f"{d['gene'][:14]}: dN/dS = {om_s}")
+        if len(items) > 6:
+            lines.append(f"... and {len(items) - 6} more")
+        ax_info.text(0.02, 0.95, '\n'.join(lines), fontsize=7.5,
+                     va='top', ha='left', color='#333333',
+                     transform=ax_info.transAxes, family='sans-serif')
+
+    if axg is not None:
+        _draw_gene_track(axg, genes, genome_len)
+        axg.set_xlabel(f'Position along {accession} (nt)', fontsize=8.5)
+
+    fig.suptitle(f'Population genetics — {accession}', fontsize=12,
+                 fontweight='bold', y=0.975)
+    return _save(fig, out_dir, f'{safe_name(accession)}_evo_popgen', formats)
+
+
+# ══════════════════════════════════════════════════════════════════
+# 编排入口
+# ══════════════════════════════════════════════════════════════════
+def _resolve_gbk(gbk_dir: Path, acc: str) -> Path | None:
+    base = str(acc).split('.')[0]
+    for cand in (gbk_dir / f'{acc}.gb', gbk_dir / f'{base}.gb',
+                 gbk_dir / f'{acc}.gbk', gbk_dir / f'{base}.gbk'):
+        if cand.is_file() and cand.stat().st_size > 0:
+            return cand
+    cands = sorted(gbk_dir.glob(f'{safe_name(base)}*.gb*')) if gbk_dir.is_dir() else []
+    return cands[0] if cands else None
+
+
+def _resolve_fasta(out_dir: Path, acc: str, gid: str) -> Path | None:
+    base = str(acc).split('.')[0]
+    cands = [(out_dir / 'virus-fasta' / f'ref_{acc}' / f'ref_{acc}.ref.fasta'),
+             (out_dir / 'virus-fasta' / f'ref_{gid}' / f'ref_{gid}.ref.fasta')]
+    for c in cands:
+        if c.is_file() and c.stat().st_size > 0:
+            return c
+    for d in (out_dir / 'virus-fasta').glob('ref_*') if (out_dir / 'virus-fasta').is_dir() else []:
+        if base in d.name:
+            for f in d.glob('*.fasta'):
+                return f
+    return None
+
+
+def _count_vcf_samples(vcf_path: Path) -> int:
+    """VCF 样本列数（#CHROM 行的第 10 列起）。"""
+    try:
+        with open(vcf_path, encoding='utf-8', errors='replace') as fh:
+            for line in fh:
+                if line.startswith('#CHROM'):
+                    cols = line.rstrip('\n').split('\t')
+                    return max(1, len(cols) - 9)
+                if not line.startswith('#'):
+                    break
+    except OSError:
+        pass
+    return 1
+
+
+def run_variant_evo(out_dir, logger=None, formats=('png', 'pdf'),
+                    accession_filter=None, run_snpgenie_stage=True,
+                    snpgenie_workdir=None, snpgenie_timeout=900,
+                    label_af_cutoff=AA_LABEL_AF_CUTOFF,
+                    max_aa_labels=MAX_AA_LABELS) -> dict:
+    """为 out_dir 下所有有变异的参考跑扩展三模块并出图。
+
+    label_af_cutoff: mutation landscape 标注氨基酸变化的 AF 下限
+    max_aa_labels: 单张图标签数量上限
+
+    返回 {'n_accessions', 'n_plots', 'plots', 'snpgenie', 'skipped'}
+    """
+    out_dir = Path(out_dir)
+    vcf_dir = out_dir / 'vcf'
+    ann_dir = out_dir / 'annotated'
+    gbk_dir = out_dir / 'gbk_files'
+    plot_dir = out_dir / 'variant_plots'
+    evo_dir = out_dir / 'variant_evo'
+
+    def _log(level, msg):
+        if logger is None:
+            return
+        getattr(logger, level, logger.info)(msg)
+
+    if not vcf_dir.is_dir():
+        _log('warning', f'无 vcf 目录，跳过扩展变异分析: {vcf_dir}')
+        return {'n_accessions': 0, 'n_plots': 0, 'plots': [],
+                'snpgenie': [], 'skipped': []}
+
+    # 参考清单：优先用 variant_summary.json，回退扫 VCF
+    accessions: list[tuple[str, str]] = []   # (accession, gid)
+    summary_path = out_dir / 'variant_summary.json'
+    if summary_path.is_file():
+        try:
+            sm = json.loads(summary_path.read_text(encoding='utf-8'))
+            for r in sm.get('results', []):
+                acc = r.get('accession') or r.get('genome')
+                gid = r.get('genome') or str(acc).split('.')[0]
+                if acc:
+                    accessions.append((acc, gid))
+        except (OSError, ValueError) as e:
+            _log('warning', f'variant_summary.json 解析失败: {e}')
+    if not accessions:
+        for fn in sorted(os.listdir(vcf_dir)):
+            if fn.endswith('.vcf') and not fn.startswith('all.'):
+                gid = fn[:-4]
+                accessions.append((gid, gid))
+    if accession_filter:
+        keep = {str(a).strip() for a in accession_filter if str(a).strip()}
+        # 容错：VCF 文件名用 gid（OR489165），filter 可能给完整 accession
+        # （OR489165.1）或反过来。取「去掉版本号后的主 accession」双向比对。
+        def _bare(s):
+            return str(s).split('.')[0]
+        keep_bare = {_bare(k) for k in keep}
+        accessions = [(a, g) for a, g in accessions
+                      if a in keep or g in keep
+                      or _bare(a) in keep_bare or _bare(g) in keep_bare]
+    if not accessions:
+        _log('warning', '无可用参考，跳过扩展变异分析')
+        return {'n_accessions': 0, 'n_plots': 0, 'plots': [],
+                'snpgenie': [], 'skipped': []}
+
+    workdir_en = Path(snpgenie_workdir) if snpgenie_workdir else (
+        _PLATFORM_ROOT / 'kv_variant_test' / '_snpgenie_evo')
+
+    plots: list[str] = []
+    snpgenie_hits: list[dict] = []
+    skipped: list[str] = []
+    n_acc = 0
+
+    for acc, gid in accessions:
+        vcf = vcf_dir / f'{gid}.vcf'
+        if not vcf.is_file():
+            alt = vcf_dir / f'{acc}.vcf'
+            if alt.is_file():
+                vcf = alt
+            else:
+                skipped.append(f'{acc}: no vcf')
+                continue
+        variants = parse_vcf_variants(vcf)
+        if not variants:
+            _log('info', f'  {acc}: 无变异位点，跳过')
+            skipped.append(f'{acc}: no variant')
+            continue
+        n_acc += 1
+
+        # 注释
+        ann_rows: list[dict] = []
+        for cand in (ann_dir / f'{gid}.ann.tsv', ann_dir / f'{acc}.ann.tsv'):
+            if cand.is_file():
+                try:
+                    ann_rows = load_ann(cand)
+                except (OSError, ValueError) as e:
+                    _log('warning', f'  {acc}: 注释读取失败 {e}')
+                break
+
+        # 基因与基因组长度
+        genes: list[dict] = []
+        genome_len = 0
+        gb = _resolve_gbk(gbk_dir, acc) if gbk_dir.is_dir() else None
+        if gb is not None:
+            genes, genome_len = load_genbank_genes(gb, logger)
+        if not genome_len:
+            genome_len = max(v['POS'] for v in variants)
+        _log('info', f'  {acc}: {len(variants)} 变异, {len(genes)} 基因, '
+                     f'len={genome_len}')
+
+        # ── 模块 A ──
+        try:
+            plots += plot_molecular_spectrum(variants, ann_rows, acc,
+                                             plot_dir, formats)
+            plots += plot_mutation_landscape(variants, ann_rows, genes, acc,
+                                             genome_len, plot_dir, formats,
+                                             label_af_cutoff=label_af_cutoff,
+                                             max_aa_labels=max_aa_labels)
+        except Exception as e:  # noqa: BLE001
+            _log('warning', f'  {acc}: 模块 A 出图失败 {e}')
+
+        # ── 模块 B ──
+        try:
+            plots += plot_variant_density(variants, genes, acc, genome_len,
+                                          plot_dir, formats)
+        except Exception as e:  # noqa: BLE001
+            _log('warning', f'  {acc}: 模块 B 出图失败 {e}')
+
+        # ── 模块 C ──
+        n_samples = _count_vcf_samples(vcf)
+        prod_rows: list[dict] = []
+        if run_snpgenie_stage and gb is not None:
+            fasta = _resolve_fasta(out_dir, acc, gid)
+            if fasta is None:
+                _log('warning', f'  {acc}: 缺参考 FASTA，跳过 SNPGenie')
+            else:
+                gtf = evo_dir / f'{safe_name(acc)}.gtf'
+                gtf, cds = genbank_cds_to_gtf(gb, gtf, safe_name(acc), logger)
+                if gtf is None or not cds:
+                    _log('info', f'  {acc}: 无完整 CDS（% 3 == 0），跳过 SNPGenie')
+                else:
+                    sg_out = run_snpgenie(fasta, gtf, vcf, workdir_en,
+                                          f'{safe_name(gid)}.snpgenie',
+                                          logger, vcfformat=4,
+                                          timeout=snpgenie_timeout)
+                    if sg_out is not None:
+                        prod_rows = read_snpgenie_product(sg_out)
+                        # 把 file 列（format 4 下是内部清洗后的临时名
+                        # temp_vcf4_SAMPLE.vcf）还原成对外稳定的 VCF 名，
+                        # 避免页面/下游拿到易变的内部文件名。
+                        for _r in prod_rows:
+                            if 'file' in _r:
+                                _r['file'] = vcf.name
+                        # 补 ORF 内变异计数：区分「无变异检出」与「无多态」
+                        try:
+                            annotate_orf_variant_counts(prod_rows, cds,
+                                                        variants)
+                            _write_product_annotated(sg_out, prod_rows)
+                        except Exception as e:  # noqa: BLE001
+                            _log('warning', f'  {acc}: ORF 变异计数标注失败 {e}')
+                        snpgenie_hits.append({
+                            'accession': acc,
+                            'n_orf': len(prod_rows),
+                            'outdir': str(sg_out.relative_to(out_dir))
+                            if str(sg_out).startswith(str(out_dir)) else str(sg_out),
+                        })
+        try:
+            plots += plot_popgen(variants, genes, acc, genome_len, n_samples,
+                                 plot_dir, prod_rows=prod_rows, formats=formats)
+        except Exception as e:  # noqa: BLE001
+            _log('warning', f'  {acc}: 模块 C 出图失败 {e}')
+        # 模块 D：SNPGenie 逐位点 / 逐密码子（仅当 SNPGenie 跑成功时才有数据）
+        if prod_rows:
+            sg_dir = None
+            for h in snpgenie_hits:
+                if h.get('accession') == acc:
+                    p = Path(h['outdir'])
+                    sg_dir = p if p.is_absolute() else (workdir_en / p)
+                    break
+            if sg_dir is not None and sg_dir.is_dir():
+                try:
+                    plots += plot_snpgenie_sites(
+                        read_snpgenie_sites(sg_dir),
+                        read_snpgenie_codons(sg_dir),
+                        genes, acc, genome_len, plot_dir, formats=formats)
+                except Exception as e:  # noqa: BLE001
+                    _log('warning', f'  {acc}: 模块 D 出图失败 {e}')
+
+    manifest = {
+        'n_accessions': n_acc,
+        'n_plots': len(plots),
+        'plots': [os.path.basename(p) for p in plots],
+        'snpgenie': snpgenie_hits,
+        'skipped': skipped,
+    }
+    try:
+        evo_dir.mkdir(parents=True, exist_ok=True)
+        # 把 SNPGenie 产物从英文工作目录回收进 out_dir/variant_evo
+        if snpgenie_hits:
+            for h in snpgenie_hits:
+                src = Path(h['outdir']) if Path(h['outdir']).is_absolute() \
+                    else workdir_en / h['outdir']
+                dst = evo_dir / f"{safe_name(h['accession'])}.snpgenie"
+                if src.is_dir():
+                    if dst.exists():
+                        shutil.rmtree(dst, ignore_errors=True)
+                    shutil.copytree(src, dst)
+                    h['outdir'] = f'variant_evo/{dst.name}'
+        (evo_dir / 'evo_manifest.json').write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding='utf-8')
+    except OSError as e:
+        _log('warning', f'evo_manifest.json 写入失败: {e}')
+
+    _log('info', f'扩展变异分析完成: {n_acc} 参考 / {len(plots)} 图 / '
+                 f'{len(snpgenie_hits)} 个 SNPGenie 结果')
+    return manifest
+
+
+if __name__ == '__main__':
+    import argparse
+    ap = argparse.ArgumentParser(description='扩展变异分析三模块出图')
+    ap.add_argument('-o', '--out-dir', required=True, help='变异段输出目录')
+    ap.add_argument('--accession', action='append', default=None)
+    ap.add_argument('--no-snpgenie', action='store_true')
+    ap.add_argument('--snpgenie-workdir', default=None)
+    ap.add_argument('--formats', default='png,pdf')
+    a = ap.parse_args()
+    logging.basicConfig(level=logging.INFO,
+                        format='%(asctime)s [%(levelname)s] %(message)s',
+                        datefmt='%H:%M:%S')
+    res = run_variant_evo(a.out_dir, logging.getLogger('kv_variant_evo'),
+                          formats=tuple(a.formats.split(',')),
+                          accession_filter=a.accession,
+                          run_snpgenie_stage=not a.no_snpgenie,
+                          snpgenie_workdir=a.snpgenie_workdir)
+    print(json.dumps(res, ensure_ascii=False, indent=2))

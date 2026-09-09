@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="vp-lang" content="{{ lang }}">
+<title>提交准备 - 植物病毒分析平台</title>
+<script>try{if(localStorage.getItem("vp_theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
+<link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
+<style>
+  .mono { font-family: var(--mono); font-size: 11.5px; }
+  #gridWrap { overflow: auto; max-height: 520px; border: 1px solid var(--line-100); border-radius: 8px; }
+  #grid { border-collapse: collapse; font-size: 11.5px; }
+  #grid th { position: sticky; top: 0; background: #f5f5f5; padding: 5px 6px; border: 1px solid #e0e0e0;
+             white-space: nowrap; font-size: 10.5px; color: #555; z-index: 2; }
+  #grid th.req { color: #b71c1c; font-weight: 700; }
+  #grid td { padding: 3px 6px; border: 1px solid #ececec; min-width: 90px; max-width: 260px;
+             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: cell; }
+  #grid td.ph { background: #fff3e0; color: #e65100; }
+  #grid td[contenteditable="true"]:focus { outline: 2px solid #1a73e8; background: #fff; }
+  #grid tr.sel { background: #e8f0fe; }
+  #grid tbody tr:hover { background: #fafafa; }
+  .qf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px 12px; }
+  .qf-grid .qf { display: flex; gap: 4px; align-items: center; }
+  .qf-grid .qf label { font-size: 11px; color: #666; min-width: 118px; }
+  .qf-grid .qf input { flex: 1; min-width: 60px; padding: 3px 6px; font-size: 11.5px; }
+  .qf-grid .qf button { padding: 3px 8px; font-size: 11px; }
+  #sbtOut { display: none; }
+  pre.fileview { font-family: var(--mono); font-size: 11.5px; background: #fafafa;
+                 border: 1px solid var(--line-100); border-radius: 8px; padding: 10px;
+                 max-height: 360px; overflow: auto; white-space: pre; }
+  .sbt-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 6px 12px; }
+  .sbt-form label { font-size: 11px; color: #666; display: block; }
+  .sbt-form input { width: 100%; padding: 4px 7px; font-size: 12px; }
+</style>
+</head>
+<body>
+{% include "_nav.html" %}
+
+<div class="page">
+  <div class="tools-layout group-layout">
+    {% include "_group_nav.html" %}
+    <main class="group-main">
+  <div class="pipe-head">
+    <div>
+      <h1 data-i18n="sb.title">📤 NCBI 提交准备</h1>
+      <p class="hint" data-i18n="sb.hint">以 unified_metadata.csv 一张表驱动 GenBank + BioSample 提交准备。</p>
+    </div>
+  </div>
+
+  <!-- ① 项目列表 -->
+  <div class="card">
+    <h2 data-i18n="sb.projects">① 提交项目</h2>
+    <div class="grid2">
+      <div>
+        <label data-i18n="sb.newName">项目名（字母/数字/_/-）</label>
+        <input id="pjName" type="text" placeholder="如 nx6_virome">
+      </div>
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <select id="pjSample" style="max-width:230px">
+          <option value="">空白表</option>
+          <option value="demo" selected>内置示例（6 行）</option>
+          <option value="public">公共数据样例（含 SRR）</option>
+          <option value="selfseq">自测数据样例（待填）</option>
+        </select>
+        <button class="btn" onclick="createDemo()" data-i18n="sb.demo">用所选样例新建</button>
+        <label class="btn" style="margin:0" data-i18n="sb.upload">上传 CSV/TSV/Excel 新建
+          <input type="file" id="pjFile" accept=".csv,.tsv,.txt,.xlsx,.xls" style="display:none"
+                 onchange="uploadTable(this)"></label>
+      </div>
+    </div>
+    <div id="pjList" style="margin-top:10px"><p class="hint" data-i18n="c.loading">加载中…</p></div>
+    <div class="err" id="pjErr"></div>
+  </div>
+
+  <!-- ② 编辑器 -->
+  <div class="card" id="editorCard">
+    <h2><span data-i18n="sb.editor">② 提交表编辑</span>
+      <span class="hint" id="edStats" style="margin-left:10px"></span></h2>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+      <button class="btn primary" onclick="saveTable()" data-i18n="sb.save">💾 保存</button>
+      <button class="btn" onclick="addRow()" data-i18n="sb.addRow">➕ 加行</button>
+      <button class="btn danger" onclick="delRows()" data-i18n="sb.delRow">🗑 删除选中行</button>
+      <input id="edFilter" type="text" style="width:200px" placeholder="查找过滤（回车）"
+             data-i18n-ph="sb.filter" onkeydown="if(event.key==='Enter')applyFilter()">
+      <button class="btn" onclick="applyFilter()" data-i18n="c.run">运行</button>
+      <button class="btn" onclick="clearFilter()" data-i18n="c.refresh">刷新</button>
+      <span style="flex:1"></span>
+      <span class="hint" style="margin-right:8px">从分析结果导入：</span>
+      <select id="impRun" style="max-width:230px"><option value="">（加载运行…）</option></select>
+      <button class="btn" onclick="importRun(this)" title="把该运行的病毒 contigs + 物种名追加为表行">📥 导入</button>
+      <span class="hint" style="margin-left:6px">关联 CDS 注释：</span>
+      <select id="orfRun" style="max-width:230px"><option value="">（加载 orf 运行…）</option></select>
+      <button class="btn" onclick="linkOrf(this)" title="把 orf/orfa 运行的 CDS 注释关联到本项目（按 contig 名对接，用于生成 .tbl）">🔗 关联</button>
+      <span class="hint" id="edName" style="margin:0"></span>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
+      <div><label data-i18n="sb.fillCol">列</label>
+        <select id="fillCol" style="min-width:160px"></select></div>
+      <div><label data-i18n="sb.fillOld">旧值（空=填全部占位符）</label>
+        <input id="fillOld" type="text" style="width:170px"></div>
+      <div><label data-i18n="sb.fillNew">新值</label>
+        <input id="fillNew" type="text" style="width:170px"></div>
+      <button class="btn" onclick="applyFill()" data-i18n="sb.apply">应用</button>
+    </div>
+    <div id="gridWrap"><table id="grid"><thead></thead><tbody></tbody></table></div>
+
+    <h3 style="margin:14px 0 6px" data-i18n="sb.quick">快速填充</h3>
+    <div class="qf-grid" id="quickFill"></div>
+
+    <details style="margin-top:12px">
+      <summary class="hint" style="cursor:pointer">每列填充进度（原 GUI Column Info）</summary>
+      <div id="colInfo" style="margin-top:8px"></div>
+    </details>
+  </div>
+
+  <!-- ③ 生成与校验 -->
+  <div class="card" id="genCard">
+    <h2 data-i18n="sb.gen">③ 生成提交文件与校验</h2>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <div><label data-i18n="sb.assembler">组装方法</label>
+        <input id="expAsm" type="text" value="SPAdes;4.3.0;metaviral" style="width:220px"></div>
+      <div><label data-i18n="sb.sequencer">测序平台</label>
+        <input id="expSeq" type="text" value="Illumina NovaSeq 6000" style="width:190px"></div>
+      <div><label data-i18n="sb.enrichment">富集方法</label>
+        <input id="expEnr" type="text" value="rRNA depletion" style="width:150px"></div>
+      <button class="btn primary" onclick="doExport()" data-i18n="sb.doExport">🧾 生成提交文件</button>
+      <button class="btn" onclick="doValidate()" data-i18n="sb.doValidate">✅ 校验</button>
+      <button class="btn" onclick="doTaxCheck(this)" title="逐个 organism 查 NCBI Taxonomy；未收录物种提交会被拒（需联网）">🌐 物种名校验</button>
+      <button class="btn" onclick="downloadBs()" data-i18n="sb.bsTsv">⬇ BioSample TSV</button>
+      <label class="hint" style="display:flex;align-items:center;gap:3px;margin:0 0 2px">
+        <input type="checkbox" id="bsIncPh" style="margin:0">含占位符行</label>
+      <button class="btn" onclick="downloadXlsx()" data-i18n="sb.xlsx">⬇ Excel</button>
+      <button class="btn" onclick="doPackage(this)" title="全部提交产物打成一个 zip，NCBI 门户 / BankIt 可直接上传">📦 打包下载</button>
+    </div>
+    <pre class="fileview" id="valOut" style="display:none"></pre>
+
+    <h3 style="margin:14px 0 6px">🧬 提交序列 FASTA（sequences.fsa）</h3>
+    <p class="hint" style="margin:0 0 6px">GenBank 提交三件套 = 序列 FASTA + source.src + template.sbt。
+       按表内 sequence_name 从平台 FASTA 提取序列并做一致性检查（ID 匹配 / 空格 / 重复 / ≥200nt）。</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+      <div style="flex:2;min-width:260px"><label>序列 FASTA（平台内路径，如 tool_runs/contigs_xxx/contigs.filtered.fasta）</label>
+        <input id="fastaSrc" type="text" placeholder="选择或粘贴平台内 FASTA 路径" style="width:100%"></div>
+      <button class="btn small" onclick="browse('fastaSrc')">📁</button>
+      <button class="btn" onclick="doFasta(this)">⬇ 生成 sequences.fsa</button>
+      <button class="btn" onclick="autoFasta(this)" title="从已导入/关联的运行自动推断序列路径并填入">✨ 自动推断</button>
+    </div>
+    <pre class="fileview" id="fastaOut" style="display:none"></pre>
+
+    <h3 style="margin:14px 0 6px">🧬 CDS 特征表（featuretable.tbl）</h3>
+    <p class="hint" style="margin:0 0 6px">从已"关联"的 orf/orfa 运行生成 GenBank 特征表
+      （CDS 坐标 + product），与 sequences.fsa 配对即可完成三件套提交；表内失配的
+      contig 会列在结果中，请核对运行选择。</p>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button class="btn primary" onclick="genTbl(this)">🧬 生成 featuretable.tbl</button>
+      <span class="hint" id="tblHint"></span>
+    </div>
+    <pre class="fileview" id="tblOut" style="display:none"></pre>
+
+    <h3 style="margin:14px 0 6px">📦 本地 .sqn 生成（suvtk / MIUVIG）</h3>
+    <p class="hint" style="margin:0 0 6px">一键跑 suvtk 提交链（features → comments →
+      table2asn），产出可直接投递 NCBI 的 <b>.sqn</b>（含 .val 官方校验报告）。
+      需先"关联注释"并填写上方作者信息。默认用 suvtk BFVD 功能注释；勾选
+      "用平台自家注释"则改用上方生成的 featuretable.tbl。</p>
+    <p class="hint" style="margin:0 0 8px">✏️ 在④文件预览里编辑 .sbt/.src/.cmt 后，
+      重新生成会自动<b>复用你的编辑</b>（不覆盖）；如需从表数据重建，删除对应
+      文件即可。</p>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:12px"><input type="checkbox" id="sqnUseOwn"
+        onchange="sqnUseOwnChange()"> 用平台自家 featuretable.tbl</label>
+      <button class="btn primary" onclick="genSqn(this)">🚀 生成 .sqn</button>
+      <span class="hint" id="sqnHint"></span>
+    </div>
+    <pre class="fileview" id="sqnOut" style="display:none"></pre>
+
+    <details style="margin-top:10px">
+      <summary class="hint" style="cursor:pointer" data-i18n="sb.sbtTitle">template.sbt 生成（作者/机构）</summary>
+      <div class="sbt-form" style="margin-top:8px">
+        <div><label>Last *</label><input id="sbtLast" type="text"></div>
+        <div><label>First *</label><input id="sbtFirst" type="text"></div>
+        <div><label>Middle</label><input id="sbtMiddle" type="text"></div>
+        <div><label>Institution *</label><input id="sbtAffil" type="text"></div>
+        <div><label>Division</label><input id="sbtDiv" type="text"></div>
+        <div><label>City *</label><input id="sbtCity" type="text"></div>
+        <div><label>State/Province</label><input id="sbtSub" type="text"></div>
+        <div><label>Country *</label><input id="sbtCountry" type="text" value="China"></div>
+        <div><label>Street</label><input id="sbtStreet" type="text"></div>
+        <div><label>Email *</label><input id="sbtEmail" type="text"></div>
+        <div><label>Postal Code</label><input id="sbtPostal" type="text"></div>
+        <div style="grid-column:1/-1"><label>Publication Title</label>
+          <input id="sbtTitle" type="text" placeholder="Plant virome of ... in ..., China"></div>
+        <div style="grid-column:1/-1"><label>Additional authors（每行一个 Last, First）</label>
+          <textarea id="sbtExtra" rows="2" style="width:100%;font-size:12px"></textarea></div>
+      </div>
+      <div style="margin-top:6px"><button class="btn" onclick="genSbt()" data-i18n="sb.genSbt">生成 template.sbt</button></div>
+    </details>
+  </div>
+
+  <!-- ④ 文件预览 -->
+  <div class="card" id="fileCard">
+    <h2 data-i18n="sb.files">④ 提交文件预览</h2>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <select id="fileSel" style="min-width:240px" onchange="showFile()"></select>
+      <button class="btn" id="fileEditBtn" onclick="toggleFileEdit(this)">✏️ 编辑</button>
+      <button class="btn primary" id="fileSaveBtn" style="display:none" onclick="saveFileEdit()">💾 保存文件</button>
+      <a class="btn" id="fileDl" download>⬇</a>
+    </div>
+    <pre class="fileview" id="fileView" style="margin-top:8px"></pre>
+  </div>
+  </main>
+  </div>
+</div>
+
+<script src="/static/i18n.js?v={{ asset_v }}"></script>
+<script src="/static/app.js?v={{ asset_v }}"></script>
+<script>
+const PH_RE = /XXXX|YYYY|PRJNAXXXX|Country:Region|SAMNXXXXXXXX|XX\.\d+/i;
+const PH_WORDS = new Set(['', 'na', 'n/a', 'not_provided', 'not collected', 'missing', 'none', 'unknown']);
+let CUR = null;            // 当前项目名
+let COLS = [];             // 列名数组
+let REQ = new Set();       // 必填列
+
+function isPh(v) {
+  const s = (v || '').trim();
+  return PH_WORDS.has(s.toLowerCase()) || PH_RE.test(s);
+}
+
+async function jfetch(url, opts) {
+  const r = await fetch(url, opts);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+  return d;
+}
+
+/* ── ① 项目列表 ── */
+async function refreshProjects() {
+  try {
+    const list = await jfetch('/api/submit/tables');
+    const box = $('pjList');
+    if (!list.length) {
+      box.innerHTML = `<p class="hint">${t('sb.none', '暂无提交项目')}</p>`;
+      return;
+    }
+    box.innerHTML = '<table class="tbl"><tr><th>#</th><th>Name</th><th>Rows</th><th>Files</th><th>Ops</th></tr>' +
+      list.map(p => {
+        const act = p.name === CUR;
+        const files = (p.files || []).filter(f => f !== 'unified_metadata.csv');
+        return `<tr${act ? ' style="background:#e8f0fe"' : ''}>` +
+          `<td class="mono">${esc(p.name)}</td><td>${p.rows}</td>` +
+          `<td class="hint" style="margin:0">${files.length ? esc(files.join(', ')) : '—'}</td>` +
+          `<td><button class="btn small ${act ? '' : 'primary'}" onclick="openTable('${esc(p.name)}')">${act ? '✓' : t('c.view', '查看')}</button>` +
+          ` <button class="btn small" onclick="copyProject('${esc(p.name)}')" title="另存为（原 GUI Save As）">⧉</button>` +
+          ` <button class="btn small danger" onclick="delProject('${esc(p.name)}')">🗑</button></td></tr>`;
+      }).join('') + '</table>';
+  } catch (e) { setConnBanner(true); }
+}
+
+async function createDemo() {
+  const name = val('pjName').trim();
+  if (!name) { $('pjErr').textContent = t('sb.needName', '请先填写项目名'); return; }
+  $('pjErr').textContent = '';
+  try {
+    await jfetch('/api/submit/create', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name, sample: val('pjSample')})});
+    CUR = name; await refreshProjects(); await openTable(name);
+  } catch (e) { $('pjErr').textContent = e.message; }
+}
+
+async function copyProject(name) {
+  const dst = prompt(`另存为（新项目名）：`, name + '_copy');
+  if (!dst || !dst.trim()) return;
+  try {
+    await jfetch('/api/submit/copy', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({src: name, dst: dst.trim()})});
+    CUR = dst.trim(); await refreshProjects(); await openTable(dst.trim());
+    toast('已另存为', dst.trim(), {ttl: 5000});
+  } catch (e) { alert(e.message); }
+}
+
+async function uploadTable(inp) {
+  const name = val('pjName').trim();
+  if (!name) { $('pjErr').textContent = t('sb.needName', '请先填写项目名'); return; }
+  const f = inp.files[0];
+  if (!f) return;
+  const fd = new FormData();
+  fd.append('name', name);
+  fd.append('file', f);
+  try {
+    const d = await jfetch('/api/submit/upload', {method: 'POST', body: fd});
+    CUR = name; await refreshProjects(); await openTable(name);
+    toast(t('sb.saved', '已保存'), `${d.rows} rows`, {ttl: 5000});
+  } catch (e) { $('pjErr').textContent = e.message; }
+  inp.value = '';
+}
+
+async function delProject(name) {
+  if (!confirm(`Delete submission project "${name}" ?`)) return;
+  try {
+    await jfetch(`/api/submit/table/${encodeURIComponent(name)}/delete`, {method: 'POST'});
+    if (CUR === name) { CUR = null; ['editorCard', 'genCard', 'fileCard'].forEach(id => $(id).style.display = 'none'); }
+    refreshProjects();
+  } catch (e) { alert(e.message); }
+}
+
+/* ── ② 编辑器 ── */
+async function openTable(name) {
+  CUR = name;
+  try { localStorage.setItem('vp_submit_last', name); } catch (e) {}
+  const d = await jfetch(`/api/submit/table/${encodeURIComponent(name)}`);
+  COLS = d.columns.map(c => c.name);
+  REQ = new Set(d.columns.filter(c => c.required).map(c => c.name));
+  ['editorCard', 'genCard', 'fileCard'].forEach(id => $(id).style.display = '');
+  $('edName').textContent = name;
+  $('edStats').textContent =
+    `${d.stats.rows} rows · ${d.stats.filled}/${d.stats.cells} (${d.stats.pct}%)`;
+  const sel = $('fillCol');
+  sel.innerHTML = COLS.map(c => `<option>${esc(c)}</option>`).join('');
+  renderGrid(d);
+  renderFiles(d.files || []);
+  refreshProjects();
+}
+
+function renderGrid(d) {
+  const thead = $('grid').querySelector('thead');
+  const tbody = $('grid').querySelector('tbody');
+  window._sortState = null;          // {col, asc}
+  window._rowsData = d.rows;
+  thead.innerHTML = '<tr><th style="min-width:34px">#</th>' +
+    d.columns.map((c, ci) =>
+      `<th class="${c.required ? 'req' : ''}" title="${esc(c.desc)}" data-c="${ci}" style="cursor:pointer" ` +
+      `onclick="sortGrid(${ci})">${esc(c.name)}<span class="hint" id="sortArrow_${ci}" style="margin-left:2px"></span></th>`).join('') + '</tr>';
+  renderTbody(d.rows);
+  renderColInfo(d);
+}
+
+function renderTbody(rows) {
+  const tbody = $('grid').querySelector('tbody');
+  tbody.innerHTML = rows.map((row, i) =>
+    `<tr data-i="${i}"><td class="mono">${i + 1}</td>` +
+    row.map((v, ci) => `<td class="${isPh(v) ? 'ph' : ''}" data-c="${ci}">${esc(v)}</td>`).join('') + '</tr>'
+  ).join('') || `<tr><td colspan="${COLS.length + 1}" class="hint">—</td></tr>`;
+  // 双击进入编辑；Ctrl/Shift 多选行（原 GUI ExtendedSelection）
+  let lastSel = -1;
+  tbody.querySelectorAll('td[data-c]').forEach(td => {
+    td.addEventListener('dblclick', () => {
+      td.contentEditable = 'true';
+      td.focus();
+      document.execCommand('selectAll', false, null);
+    });
+    td.addEventListener('blur', () => {
+      td.contentEditable = 'false';
+      td.classList.toggle('ph', isPh(td.textContent));
+    });
+    td.addEventListener('keydown', ev => {
+      if (ev.key === 'Enter') { ev.preventDefault(); td.blur(); }
+    });
+    td.addEventListener('click', ev => {
+      const tr = td.parentElement;
+      const i = +tr.dataset.i;
+      if (ev.shiftKey && lastSel >= 0) {
+        const lo = Math.min(lastSel, i), hi = Math.max(lastSel, i);
+        tbody.querySelectorAll('tr[data-i]').forEach(x =>
+          x.classList.toggle('sel', +x.dataset.i >= lo && +x.dataset.i <= hi));
+      } else if (ev.ctrlKey || ev.metaKey) {
+        tr.classList.toggle('sel'); lastSel = i;
+      } else {
+        tbody.querySelectorAll('tr.sel').forEach(x => x.classList.remove('sel'));
+        tr.classList.add('sel'); lastSel = i;
+      }
+    });
+  });
+}
+
+function sortGrid(ci) {
+  const s = window._sortState;
+  const asc = s && s.col === ci ? !s.asc : true;
+  window._sortState = {col: ci, asc};
+  const rows = window._rowsData.slice()
+    .sort((a, b) => {
+      const x = (a[ci] || '').trim(), y = (b[ci] || '').trim();
+      const nx = parseFloat(x), ny = parseFloat(y);
+      const cmp = (!isNaN(nx) && !isNaN(ny) && x !== '' && y !== '')
+        ? nx - ny : x.localeCompare(y);
+      return asc ? cmp : -cmp;
+    });
+  renderTbody(rows);
+  COLS.forEach((_, k) => { const el = $('sortArrow_' + k); if (el) el.textContent = ''; });
+  const arrow = $('sortArrow_' + ci);
+  if (arrow) arrow.textContent = asc ? '▲' : '▼';
+}
+
+/* 每列填充进度（原 GUI Column Info 标签） */
+function renderColInfo(d) {
+  const box = $('colInfo');
+  if (!box) return;
+  const total = d.rows.length;
+  if (!total) { box.innerHTML = '<p class="hint">—</p>'; return; }
+  box.innerHTML = d.columns.map((c, colIdx) => {
+    const filled = d.rows.reduce((n, row) => n + (isPh(row[colIdx]) ? 0 : 1), 0);
+    const pct = Math.round(filled / total * 100);
+    const barLen = 20, fl = Math.round(filled / total * barLen);
+    const bar = '█'.repeat(fl) + '░'.repeat(barLen - fl);
+    return `<div style="margin-bottom:4px;font-size:11.5px">` +
+      `<b>${esc(c.name)}</b> <span class="hint">[${c.required ? 'REQUIRED' : 'optional'}] ${esc(c.desc)}</span><br>` +
+      `<span class="mono">${bar} ${filled}/${total}（${pct}%）</span></div>`;
+  }).join('');
+}
+
+function collectRows() {
+  const rows = [];
+  $('grid').querySelectorAll('tbody tr[data-i]').forEach(tr => {
+    const cells = tr.querySelectorAll('td[data-c]');
+    if (!cells.length) return;
+    rows.push(Array.from(cells).map(td => td.textContent.trim()));
+  });
+  return rows;
+}
+
+async function saveTable() {
+  if (!CUR) return;
+  const n = await jfetch(`/api/submit/table/${encodeURIComponent(CUR)}/save`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({columns: COLS, rows: collectRows()})});
+  toast(t('sb.saved', '已保存'), `${n.rows} rows`, {ttl: 4000});
+  refreshProjects();
+}
+
+async function addRow() {
+  await jfetch(`/api/submit/table/${encodeURIComponent(CUR)}/rows`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({add: 1})});
+  await openTable(CUR);
+}
+
+async function delRows() {
+  const sel = $('grid').querySelectorAll('tbody tr.sel');
+  if (!sel.length) { alert(t('sb.pickProject', '请先选择行')); return; }
+  if (!confirm(`删除 ${sel.length} 行？`)) return;
+  const idx = Array.from(sel).map(tr => +tr.dataset.i);
+  await jfetch(`/api/submit/table/${encodeURIComponent(CUR)}/rows`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({delete: idx})});
+  await openTable(CUR);
+}
+
+function applyFilter() {
+  const kw = val('edFilter').trim().toLowerCase();
+  $('grid').querySelectorAll('tbody tr[data-i]').forEach(tr => {
+    tr.style.display = (!kw || tr.textContent.toLowerCase().includes(kw)) ? '' : 'none';
+  });
+}
+function clearFilter() { $('edFilter').value = ''; applyFilter(); }
+
+async function applyFill() {
+  const col = val('fillCol'), nv = val('fillNew'), ov = val('fillOld');
+  if (!col || !nv) return;
+  const d = await jfetch(`/api/submit/table/${encodeURIComponent(CUR)}/fill`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({column: col, value: nv, old: ov || null})});
+  toast(t('sb.apply', '应用'), `${d.count} × ${col}`, {ttl: 4000});
+  await openTable(CUR);
+}
+
+function renderQuickFill() {
+  const fields = [
+    ['bioproject', 'PRJNA...'], ['biosample', 'SAMN...'],
+    ['authors', 'Last, First; ...'], ['collection_date', 'YYYY-MM-DD'],
+    ['src-geo_loc_name', 'Country:Region'], ['src-Lat_Lon', 'XX.XX N XXX.XX E'],
+    ['src-Host', 'Host species'], ['cmt-Assembly_Method', 'SPAdes;4.3.0;...'],
+    ['cmt-Sequencing_Technology', 'Illumina NovaSeq 6000'],
+  ];
+  $('quickFill').innerHTML = fields.map(([c, ph]) =>
+    `<div class="qf"><label>${esc(c)}</label><input id="qf_${esc(c)}" placeholder="${esc(ph)}">` +
+    `<button class="btn small" onclick="quickFill('${esc(c)}')">Fill</button></div>`).join('');
+}
+async function quickFill(col) {
+  const v = val('qf_' + col);
+  if (!v) return;
+  const d = await jfetch(`/api/submit/table/${encodeURIComponent(CUR)}/fill`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({column: col, value: v})});
+  toast(t('sb.quick', '快速填充'), `${d.count} × ${col}`, {ttl: 4000});
+  await openTable(CUR);
+}
+
+/* ── ③ 生成与校验 ── */
+async function doExport() {
+  if (!CUR) return;
+  try {
+    const d = await jfetch(`/api/submit/table/${encodeURIComponent(CUR)}/export`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({assembler: val('expAsm'), sequencer: val('expSeq'),
+                            enrichment: val('expEnr')})});
+    toast(t('sb.exportOk', '提交文件已生成'), `${Object.keys(d.files).length} files`, {ttl: 6000});
+    await openTable(CUR);
+    const sel = $('fileSel');
+    if ([...sel.options].some(o => o.value === 'report.html')) { sel.value = 'report.html'; showFile(); }
+  } catch (e) { alert(e.message); }
+}
+
+async function doValidate() {
+  if (!CUR) return;
+  const d = await jfetch(`/api/submit/table/${encodeURIComponent(CUR)}/validate`);
+  const box = $('valOut');
+  box.style.display = '';
+  if (!d.issues.length) { box.textContent = t('sb.validateOk', '✓ 可以提交'); return; }
+  const KIND = { missing_col: '缺少列', placeholder: '必填未填',
+                 format: '格式问题', duplicate: '重复' };
+  box.textContent = `${d.issues.length} ${t('sb.issues', '个问题：')}\n` +
+    d.issues.map(i => i.kind === 'missing_col'
+      ? `  [缺少列] ${i.column} — ${i.desc}`
+      : `  [${KIND[i.kind] || i.kind} × ${i.count}] ${i.column} — ${i.desc}` +
+        (i.examples?.length ? `\n      例: ${i.examples.map(x => JSON.stringify(x)).join(', ')}` : '')
+    ).join('\n');
+}
+
+async function doFasta(btn) {
+  if (!CUR) return;
+  const src = val('fastaSrc');
+  if (!src) { alert('请先填平台内 FASTA 路径'); return; }
+  const unlock = lockBtn(btn, '⏳ 提取中…');
+  try {
+    const d = await jfetch(`/api/submit/table/${encodeURIComponent(CUR)}/fasta`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({fasta: src})});
+    const lines = [`✓ sequences.fsa 已生成：${d.written} 条序列`];
+    if (d.missing.length) lines.push(`⚠ 表内有而 FASTA 缺 ${d.missing.length} 条（这些序列不会出现在提交里）：${d.missing.slice(0, 5).join(', ')}${d.missing.length > 5 ? ' …' : ''}`);
+    if (d.extra.length) lines.push(`ℹ FASTA 有而表内没有 ${d.extra.length} 条（未导出）`);
+    if (d.short.length) lines.push(`⚠ 短于 200nt ${d.short.length} 条（NCBI GenBank 一般拒收）：${d.short.map(x => `${x.id}(${x.length}bp)`).slice(0, 5).join(', ')}`);
+    if (d.duplicates.length) lines.push(`⚠ sequence_name 重复：${d.duplicates.slice(0, 5).join(', ')}`);
+    if (d.replaced) lines.push(`ℹ ${d.replaced} 个非 IUPAC 字符已替换为 N`);
+    const box = $('fastaOut');
+    box.textContent = lines.join('\n');
+    box.style.display = '';
+    await openTable(CUR);
+    const sel = $('fileSel');
+    if ([...sel.options].some(o => o.value === 'sequences.fsa')) { sel.value = 'sequences.fsa'; showFile(); }
+  } catch (e) { alert(e.message); }
+  unlock();
+}
+
+async function doPackage(btn) {
+  if (!CUR) return;
+  const unlock = lockBtn(btn, '⏳ 打包中…');
+  try {
+    const d = await jfetch(`/api/submit/table/${encodeURIComponent(CUR)}/package`, {method: 'POST'});
+    toast('📦 打包完成', `${d.files} 个文件`, {ttl: 5000});
+    location.href = d.download;
+  } catch (e) { alert(e.message); }
+  unlock();
+}
+
+async function doTaxCheck(btn) {
+  if (!CUR) return;
+  const unlock = lockBtn(btn, '⏳ 查询 NCBI…');
+  try {
+    const d = await jfetch(`/api/submit/table/${encodeURIComponent(CUR)}/taxonomy_check`, {method: 'POST'});
+    const box = $('valOut');
+    box.style.display = '';
+    if (!d.rows.length) { box.textContent = '（表内没有可校验的 organism）'; }
+    else {
+      const lines = d.rows.map(r =>
+        `  ${r.found ? '✓' : '✗ 未收录'} ${r.organism}${r.taxid ? ' (taxid ' + r.taxid + ')' : ''}`);
+      box.textContent = `NCBI Taxonomy 物种名校验（${d.rows.length} 个）：\n` + lines.join('\n') +
+        (d.missing.length ? `\n\n⚠ ${d.missing.length} 个物种名未被 NCBI 收录，直接提交会被拒：\n` +
+         `   新物种需先与 NCBI 沟通（taxonomy@ncbi.nlm.nih.gov）或改用更高级阶元名。` : '');
+    }
+  } catch (e) { alert(e.message); }
+  unlock();
+}
+
+async function loadContigRuns() {
+  const sel = $('impRun');
+  if (!sel) return;
+  try {
+    const runs = await jfetch('/api/submit/contig_runs');
+    sel.innerHTML = runs.length
+      ? runs.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join('')
+      : '<option value="">（暂无含分类表的 contigs 运行）</option>';
+  } catch (e) { sel.innerHTML = '<option value="">（加载失败）</option>'; }
+}
+
+async function loadOrfRuns() {
+  const sel = $('orfRun');
+  if (!sel) return;
+  try {
+    const runs = await jfetch('/api/submit/orf_runs');
+    sel.innerHTML = runs.length
+      ? runs.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join('')
+      : '<option value="">（暂无 orf/orfa 注释运行）</option>';
+  } catch (e) { sel.innerHTML = '<option value="">（加载失败）</option>'; }
+}
+
+async function linkOrf(btn) {
+  if (!CUR) return;
+  const run = val('orfRun');
+  if (!run) { alert('先选择要关联的 orf/orfa 运行'); return; }
+  const unlock = lockBtn(btn, '⏳ 关联中…');
+  try {
+    const d = await jfetch(`/api/submit/table/${encodeURIComponent(CUR)}/link_orf`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({run})});
+    let msg = `已关联 ${d.run}：匹配 CDS ${d.n_cds} 条`;
+    if (d.n_missing) msg += `，${d.n_missing} 个 contig 未匹配（${(d.missing || []).slice(0,3).join(', ')}${d.n_missing>3?'…':''}）`;
+    const hosts = Object.entries(d.host_sources || {}).slice(0,3)
+      .map(([c, h]) => `${c}:${h}`).join('，');
+    if (hosts) msg += `；宿主线索 ${hosts}`;
+    toast('🔗 关联完成', msg, {ttl: 8000});
+    $('tblHint').textContent = '已关联 ' + d.run + ' — 可点击下方"生成 featuretable.tbl"';
+    await openTable(CUR);
+  } catch (e) { alert(e.message); }
+  unlock();
+}
+
+async function genTbl(btn) {
+  if (!CUR) return;
+  const unlock = lockBtn(btn, '⏳ 生成中…');
+  try {
+    const d = await jfetch(`/api/submit/table/${encodeURIComponent(CUR)}/tbl`, {
+      method: 'POST'});
+    toast('🧬 特征表已生成', `${d.contigs.length} 个 contig · ${d.cds_total} 条 CDS` +
+      (d.no_product ? `（${d.no_product} 条无 product→hypothetical）` : ''),
+      {ttl: 6000});
+    const pre = $('tblOut');
+    pre.style.display = 'block';
+    pre.textContent =
+      `>Feature ×${d.contigs.length}（CDS 共 ${d.cds_total}）\n` +
+      (d.skipped && d.skipped.length ? `⚠ 表内未匹配 contig（无 CDS）：${d.skipped.join(', ')}\n` : '') +
+      (d.sources && d.sources.gff ? `坐标来源: ${d.sources.gff}\n` : '');
+    await openTable(CUR);
+    const sel = $('fileSel');
+    if ([...sel.options].some(o => o.value === 'featuretable.tbl')) { sel.value = 'featuretable.tbl'; showFile(); }
+  } catch (e) { alert(e.message); }
+  unlock();
+}
+
+async function autoFasta(btn) {
+  if (!CUR) return;
+  const unlock = lockBtn(btn, '⏳ 推断中…');
+  try {
+    const d = await jfetch(`/api/submit/table/${encodeURIComponent(CUR)}/source_fasta`);
+    if (d.fasta) {
+      $('fastaSrc').value = d.fasta;
+      toast('✨ 已自动推断', d.fasta, {ttl: 6000});
+    } else {
+      alert('未能自动推断序列 FASTA——请先在①导入 contigs 运行或关联 orf 运行，或手动粘贴路径');
+    }
+  } catch (e) { alert(e.message); }
+  unlock();
+}
+
+async function importRun(btn) {
+  if (!CUR) return;
+  const run = val('impRun');
+  if (!run) { alert('先选择要导入的运行'); return; }
+  const unlock = lockBtn(btn, '⏳ 导入中…');
+  try {
+    const d = await jfetch(`/api/submit/table/${encodeURIComponent(CUR)}/import_run`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({run})});
+    toast('📥 导入完成', `新增 ${d.added} 行，跳过 ${d.skipped}`, {ttl: 6000});
+    await openTable(CUR);
+  } catch (e) { alert(e.message); }
+  unlock();
+}
+
+function downloadUrl(fname) {
+  return `/submissions/${encodeURIComponent(CUR)}/${encodeURIComponent(fname)}`;
+}
+async function downloadBs() {
+  if (!CUR) return;
+  try {
+    const d = await jfetch(`/api/submit/table/${encodeURIComponent(CUR)}/biosample`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({include_placeholders: $('bsIncPh') && $('bsIncPh').checked})});
+    toast(t('sb.bsTsv', 'BioSample TSV'), `${d.rows} rows (${d.skipped} skipped)`, {ttl: 6000});
+    location.href = downloadUrl('biosample_registration.tsv');
+  } catch (e) { alert(e.message); }
+}
+function downloadXlsx() {
+  if (!CUR) return;
+  location.href = downloadUrl('unified_metadata.xlsx');
+}
+async function genSbt() {
+  if (!CUR) return;
+  const F = k => val('sbt' + k);
+  try {
+    const d = await jfetch(`/api/submit/table/${encodeURIComponent(CUR)}/sbt`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({fields: {
+          last: F('Last'), first: F('First'), middle: F('Middle'),
+          affil: F('Affil'), div: F('Div'), city: F('City'), sub: F('Sub'),
+          country: F('Country'), street: F('Street'), email: F('Email'),
+          postal: F('Postal')},
+        title: F('Title'),
+        extra_authors: val('sbtExtra').split(/\r?\n/).filter(Boolean)})});
+    toast(t('sb.sbtOk', 'template.sbt 已生成'), `${d.authors} authors`, {ttl: 6000});
+    await openTable(CUR);
+    const sel = $('fileSel');
+    if ([...sel.options].some(o => o.value === 'template.sbt')) { sel.value = 'template.sbt'; showFile(); }
+  } catch (e) { alert(e.message); }
+}
+
+async function genSqn(btn) {
+  if (!CUR) return;
+  const F = k => val('sbt' + k);
+  const unlock = lockBtn(btn, '⏳ 生成 .sqn 中（含 suvtk BFVD 注释，可能需数十秒）…');
+  const pre = $('sqnOut');
+  pre.style.display = 'block';
+  pre.textContent = '正在运行 suvtk 提交链…（features → comments → table2asn）';
+  try {
+    const author = {
+      last: F('Last'), first: F('First'), middle: F('Middle'),
+      affil: F('Affil'), div: F('Div'), city: F('City'), sub: F('Sub'),
+      country: F('Country'), street: F('Street'), email: F('Email'),
+      postal: F('Postal')};
+    const d = await jfetch(`/api/submit/table/${encodeURIComponent(CUR)}/sqn`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({author, use_features: !$('sqnUseOwn').checked})});
+    const st = d.stats || {};
+    pre.textContent =
+      `✅ .sqn 生成完成\n` +
+      `文件: ${d.sqn}\n` +
+      `校验: Error ${st.error} / Warning ${st.warning} / Info ${st.info}\n\n` +
+      `—— 校验摘要（前若干条）——\n` +
+      (d.val_head && d.val_head.length ? d.val_head.join('\n') : '(无)');
+    toast('📦 .sqn 已生成', `Error ${st.error} · Warning ${st.warning}`, {ttl: 8000});
+    await openTable(CUR);
+  } catch (e) {
+    pre.textContent = '❌ 生成失败：' + e.message;
+    alert(e.message);
+  }
+  unlock();
+}
+
+function sqnUseOwnChange() {
+  const own = $('sqnUseOwn').checked;
+  const h = $('sqnHint');
+  h.textContent = own ? '将使用上方生成的 featuretable.tbl（平台自家注释）'
+                      : '将运行 suvtk features（BFVD 功能注释）';
+}
+
+/* ── ④ 文件预览 ── */
+function renderFiles(files) {
+  const sel = $('fileSel');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">—</option>' +
+    files.filter(f => !f.endsWith('/') && f !== 'unified_metadata.csv' && !f.startsWith('source_individual'))
+      .map(f => `<option value="${esc(f)}">${esc(f)}</option>`).join('');
+  if (cur && files.includes(cur)) sel.value = cur;
+  $('fileDl').style.visibility = sel.value ? 'visible' : 'hidden';
+}
+async function showFile() {
+  const f = val('fileSel');
+  $('fileDl').style.visibility = f ? 'visible' : 'hidden';
+  exitFileEdit();
+  if (f) $('fileDl').href = downloadUrl(f);
+  if (!f) { $('fileView').textContent = ''; return; }
+  try {
+    const d = await jfetch(`/api/submit/table/${encodeURIComponent(CUR)}/file?name=${encodeURIComponent(f)}`);
+    $('fileView').textContent = d.content || '(empty)';
+  } catch (e) { $('fileView').textContent = 'Error: ' + e.message; }
+}
+
+/* 预览在线编辑（原 GUI Preview 标签 Edit/Save；.sqn 二进制锁定） */
+function toggleFileEdit(btn) {
+  const f = val('fileSel');
+  if (!f) return;
+  if ($('fileView').isContentEditable) { exitFileEdit(); return; }
+  if (f.toLowerCase().endsWith('.sqn')) {
+    alert('.sqn 为二进制 ASN.1，仅可查看（同原 GUI）');
+    return;
+  }
+  $('fileView').contentEditable = 'true';
+  $('fileView').focus();
+  btn.textContent = '🔒 锁定';
+  $('fileSaveBtn').style.display = '';
+}
+function exitFileEdit() {
+  $('fileView').contentEditable = 'false';
+  const btn = $('fileEditBtn');
+  if (btn) btn.textContent = '✏️ 编辑';
+  $('fileSaveBtn').style.display = 'none';
+}
+async function saveFileEdit() {
+  const f = val('fileSel');
+  if (!f || !CUR) return;
+  try {
+    await jfetch(`/api/submit/table/${encodeURIComponent(CUR)}/file_save`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: f, content: $('fileView').textContent})});
+    toast('已保存', f, {ttl: 4000});
+    exitFileEdit();
+  } catch (e) { alert(e.message); }
+}
+
+renderQuickFill();
+loadContigRuns();
+loadOrfRuns();
+// 默认展开提交工作区：自动打开最近项目（无则第一个），让 ②③④ 直接可见
+(async function autoOpen() {
+  try {
+    const list = await jfetch('/api/submit/tables');
+    if (list && list.length) {
+      let last = null;
+      try { last = localStorage.getItem('vp_submit_last'); } catch (e) {}
+      const t = list.find(p => p.name === last) || list[0];
+      await openTable(t.name);
+    } else {
+      refreshProjects();
+    }
+  } catch (e) { refreshProjects(); }
+})();
+
+</script>
+</body>
+</html>

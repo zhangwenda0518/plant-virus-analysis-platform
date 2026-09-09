@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>引物设计 - 植物病毒分析平台</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="vp-lang" content="{{ lang }}">
+<script>try{if(localStorage.getItem("vp_theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
+<link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
+</head>
+<body>
+{% include "_nav.html" %}
+
+<div class="page">
+  <div class="tools-layout group-layout">
+    {% include "_group_nav.html" %}
+    <main class="group-main">
+  <div class="layout">
+    <div class="col">
+      <div class="card">
+        <h1>🧪 引物设计（primer3）</h1>
+        <p class="hint">独立模块，两种模式：
+        <b>全长分窗</b>——对基因组 / contigs FASTA 按 3kb 窗全覆盖设计；
+        <b>保守区</b>——输入<b>已比对</b>的多序列 FASTA（如结构比较产物的 aln.fasta），
+        自动找保守区设计。产物 primers.tsv（含 Tm / GC / 产物长 / 罚分）。</p>
+
+        <label>设计模式</label>
+        <select id="pr_mode">
+          <option value="plain">全长分窗（基因组 / contigs FASTA）</option>
+          <option value="conserved">保守区（多序列比对 FASTA）</option>
+        </select>
+        <label>输入 FASTA</label>
+        <div class="filerow">
+          <input id="pr_fa" type="text" placeholder="选择 .fasta[.gz]">
+          <button class="btn small" onclick="browse('pr_fa')">📁</button>
+          <button class="btn small" onclick="pasteSeq('pr_fa', '.fasta')" title="粘贴 FASTA">📋</button>
+          <button class="btn small" onclick="fillExample('pr_fa', ($('pr_mode')?.value === 'conserved') ? EXAMPLE_CONSERVED_FASTA : EXAMPLE_FASTA)"
+                  title="按模式填入内置示例：全长=2 条病毒基因组；保守区=5 条近缘序列">✨ 示例</button>
+        </div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:end">
+          <div class="gp-item">
+            <label>每区返回引物对数</label>
+            <input id="pr_num" type="number" value="3" min="1" max="10">
+          </div>
+          <label style="font-size:12.5px;display:flex;align-items:center;gap:5px;padding-bottom:8px">
+            <input type="checkbox" id="pr_spec"> 宿主特异性 BLAST 检查
+            <small>（需已建宿主 BLAST 库）</small></label>
+        </div>
+        <div style="margin-top:12px">
+          <button class="btn primary" onclick="runPrimer(this)">▶ 运行引物设计</button>
+        </div>
+        <div class="tool-out">
+          <div class="tool-out-head">📤 输出</div>
+          <div class="toolrun" id="toolrun-primer"></div>
+      <div class="rh" id="rh-primer"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+    </main>
+  </div>
+</div>
+
+<!-- 文件/目录选择对话框 -->
+<div id="dlgMask" class="dlgmask" style="display:none">
+  <div class="dlg">
+    <div class="dlghead"><b data-i18n="c.chooseFile">选择文件</b>
+      <button class="btn small" onclick="closeDlg()">✕</button></div>
+    <div id="dlgPath" class="dlgpath"></div>
+    <div id="dlgList" class="dlglist"></div>
+    <div id="dlgPickDir" style="display:none;padding:10px 16px;border-top:1px solid var(--line-100);text-align:right">
+      <button class="btn small primary" onclick="pickDir()" data-i18n="c.pickDir">选择此目录 ✔</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/i18n.js?v={{ asset_v }}"></script>
+<script src="/static/app.js?v={{ asset_v }}"></script>
+<script>
+/* $ / esc / browse / startPolling / taskLogOpen 均来自 app.js */
+
+function val(id) { return ($(id)?.value || '').trim(); }
+
+async function _runTool(tool, params, btn, busyText) {
+  try {
+    const r = await fetch('/api/tool/run', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tool, params })});
+    if (!r.ok) { alert('启动失败: ' + ((await r.json()).error || '')); return; }
+    const d = await r.json();
+    taskLogOpen.add(d.task);
+    startPolling();
+    $('tasks')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    watchTaskBtn(d.task, btn, busyText || '⏳ 运行中…');
+  } catch (e) { alert('无法连接平台服务: ' + e); }
+}
+
+function runPrimer(btn) {
+  if (!val('pr_fa')) { alert('请选择输入 FASTA'); return; }
+  _runTool('primer', {
+    fasta: val('pr_fa'), mode: $('pr_mode').value,
+    num_return: +val('pr_num') || 3, specificity: !!$('pr_spec').checked },
+    btn, '⏳ 设计中…');
+}
+
+startPolling();
+</script>
+</body>
+</html>

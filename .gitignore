@@ -1,0 +1,62 @@
+# ============================================================
+# 植物病毒分析平台 · 版本控制基线
+# ------------------------------------------------------------
+# 目的：让所有代码改动可追溯（替代 *.bak_* 手工备份）
+# 原则：只纳管「人写的代码与配置」，不纳管数据 / 外部工具 / 构建产物
+# 说明：被忽略的文件仍在磁盘上，只是不进 git 历史
+# ============================================================
+
+# ---------- 1. 数据与运行产物（约 28GB，可重新生成或下载） ----------
+databases/
+tools/
+downloads/
+fastq/
+results/
+tool_runs/
+meta_search/
+logan/
+submissions/
+uploads/
+logs/
+tasks/
+host-db/
+virus-db/
+
+# ---------- 2. 归档 / 备份 / 审计快照（不参与日常开发） ----------
+_archive/
+_audit_20260909/
+_backup_before_*/
+
+# ---------- 3. 外部二进制与第三方源码（体积大、从不修改） ----------
+bin/*.exe
+git-repo/
+vendor/
+open-virome/
+
+# ---------- 4. 前端第三方资源（不修改，可重新获取） ----------
+webapp/static/plotly.min.js
+webapp/static/vendor/
+webapp/static/virome/
+
+# ---------- 5. 测试数据（可由 tests/make_*.py 再造） ----------
+tests/_ho*/
+tests/_pyr/
+tests/_ck_s*/
+tests/_hk*/
+tests/*.gz
+tests/*.fastq
+
+# ---------- 6. Python / 工具链缓存 ----------
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mimosa/
+.zcode/
+.workbuddy/
+_app.pid
+
+# ---------- 7. 打包与临时产物 ----------
+dist/
+build/
+*.log
+*.tmp

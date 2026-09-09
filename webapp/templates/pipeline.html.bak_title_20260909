@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="vp-lang" content="{{ lang }}">
+<title>植物病毒分析平台 · 分析管道</title>
+<script>try{if(localStorage.getItem("vp_theme")==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
+<link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
+</head>
+<body>
+{% include "_nav.html" %}
+
+<div class="page">
+  <div class="pipe-head">
+    <div>
+      <h1 data-i18n="pp.title">样品分析管道</h1>
+      <p class="hint" data-i18n="pp.hint">按功能模块逐级运行：每一步的输出自动作为下一步输入（↓），
+         可单步运行 / 重跑；「依次运行」从第一个未完成步骤连续执行。</p>
+    </div>
+    <!-- 全局参数（常显，影响所有步骤） -->
+    <div class="global-params">
+      <div class="gp-item">
+        <label data-i18n="pp.threads">线程数</label>
+        <input id="threads" type="number" data-i18n-ph="pp.auto" placeholder="自动" min="1">
+      </div>
+      <div class="gp-item">
+        <label data-i18n="pp.confidence">分类置信度</label>
+        <input id="confidence" type="number" step="0.05" value="0" min="0" max="1">
+      </div>
+      <div class="gp-item" style="flex:1;min-width:220px">
+        <label data-i18n="pp.chunkDir">chunk 临时目录（空=自动选空间足够的盘）</label>
+        <div class="filerow">
+          <input id="chunk_dir" type="text" data-i18n-ph="pp.chunkPh"
+                 placeholder="自动（需求≈解压后数据×2）">
+          <button class="btn small" onclick="browseDir('chunk_dir')">📁</button>
+        </div>
+      </div>
+      <label class="chk"><input type="checkbox" id="force"><span data-i18n="pp.force"> 强制重跑</span></label>
+    </div>
+  </div>
+
+  <div class="pipe-layout">
+    <!-- 左：样品 + 新建 -->
+    <section class="card side">
+      <h2 data-i18n="pp.samples">样品</h2>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <select id="projFilter" onchange="loadSamples()" style="flex:1;font-size:12px"></select>
+      </div>
+      <div id="samples"><p class="hint" data-i18n="c.loading">加载中…</p></div>
+
+      <h2 style="margin-top:20px" data-i18n="pp.newSample">新建样品</h2>
+      <label data-i18n="pp.sampleName">样品名</label>
+      <input id="sample" type="text" data-i18n-ph="pp.samplePh" placeholder="如 NX-5">
+      <label class="req" data-i18n="pp.r1">R1 FASTQ（正向）</label>
+      <div class="filerow">
+        <input id="r1" type="text" class="file-input" data-i18n-ph="pp.pickPh" placeholder="点击 📁 选择">
+        <button class="btn small" onclick="browse('r1')">📁</button>
+        <button class="btn small" onclick="pasteSeq('r1', '.fastq')" title="粘贴 FASTQ">📋</button>
+      </div>
+      <label data-i18n="pp.r2">R2 FASTQ（反向可选，单端留空）</label>
+      <div class="filerow">
+        <input id="r2" type="text" class="file-input" data-i18n-ph="pp.pickPh" placeholder="点击 📁 选择">
+        <button class="btn small" onclick="browse('r2')">📁</button>
+        <button class="btn small" onclick="pasteSeq('r2', '.fastq')" title="粘贴 FASTQ">📋</button>
+      </div>
+      <label class="chk"><input type="checkbox" id="subsample_on"><span data-i18n="pp.subOn"> 创建时截取子样本（快速验证）</span></label>
+      <div id="sub_row" style="display:none">
+        <label data-i18n="pp.subPairs">子采样（对）</label>
+        <input id="subsample" type="number" value="100000">
+      </div>
+      <label data-i18n="pp.sampleProject">项目名（可选，用于分组查看）</label>
+      <input id="sampleProject" type="text" data-i18n-ph="pp.projectPh" placeholder="如 2026-烟草-课题组">
+      <button class="btn primary" style="width:100%" onclick="createSample(this)" data-i18n="pp.create">创建样品 →</button>
+      <div id="cErr" class="err"></div>
+
+      <h2 style="margin-top:20px" data-i18n="pp.batchTitle">📦 批量导入（项目）</h2>
+      <p class="hint" style="margin-top:4px" data-i18n="pp.batchHint">每行一条：样品名<TAB>R1 路径<TAB>R2 路径（可空）。创建后可选加入批处理队列顺序执行。</p>
+      <label data-i18n="pp.batchProject">项目名（可选）</label>
+      <input id="batchProject" type="text" data-i18n-ph="pp.projectPh" placeholder="如 2026-烟草-课题组">
+      <label data-i18n="pp.batchText">样品列表（TSV：样品名 / R1 / R2）</label>
+      <textarea id="batchText" rows="5" style="font-family:var(--mono);font-size:11.5px"
+        placeholder="NX-1&#9;fastq/NX-1_R1.fastq.gz&#9;fastq/NX-1_R2.fastq.gz&#10;NX-2&#9;fastq/NX-2_R1.fastq.gz"></textarea>
+      <label class="chk"><input type="checkbox" id="batchEnq" checked><span data-i18n="pp.batchEnq"> 创建后加入队列依次运行</span></label>
+      <button class="btn primary" style="width:100%" onclick="batchCreate(this)" data-i18n="pp.batchCreate">📦 批量创建样品</button>
+      <div id="bErr" class="err"></div>
+    </section>
+
+    <!-- 右：管道视图（阶段卡片由 JS 渲染，含各步参数） -->
+    <section id="pipe" class="pipe-col">
+      <div class="card"><p class="hint" style="margin:4px 0" data-i18n="pp.empty">
+        从左侧选择或新建样品后，这里按模块显示分析管道。</p></div>
+    </section>
+  </div>
+
+  <div class="card">
+    <h2 data-i18n="pp.queueTitle">⏳ 批处理队列</h2>
+    <div id="queueBox"><p class="hint" data-i18n="pp.queueEmpty">队列为空</p></div>
+    <div style="margin-top:6px">
+      <button class="btn small" onclick="queueClear()" data-i18n="pp.qClear">🧹 清除已完成</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 data-i18n="c.tasks">运行任务</h2>
+    <div id="tasks"><p class="hint" data-i18n="c.noTasks">暂无任务</p></div>
+  </div>
+</div>
+
+<!-- 文件浏览弹窗 -->
+<div id="dlgMask" class="dlgmask" style="display:none">
+  <div class="dlg">
+    <div class="dlghead"><b data-i18n="c.chooseFile">选择文件</b>
+      <button class="btn small" onclick="closeDlg()">✕</button></div>
+    <div id="dlgPath" class="dlgpath"></div>
+    <div id="dlgList" class="dlglist"></div>
+    <div id="dlgPickDir" style="display:none;padding:10px 16px;border-top:1px solid var(--line-100);text-align:right">
+      <button class="btn small primary" onclick="pickDir()" data-i18n="c.pickDir">选择此目录 ✔</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/i18n.js?v={{ asset_v }}"></script>
+<script src="/static/app.js?v={{ asset_v }}"></script>
+</body>
+</html>
