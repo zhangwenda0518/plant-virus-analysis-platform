@@ -122,14 +122,15 @@ def main():
 
     # ---------- 3a. contigs 卡：Krona 前置 / 宿主筛选与自动预测 / ID 复制 / 跳转 ----
     hv = c.get('/tools?g=virus').get_data(as_text=True)
-    # Krona 旭日块已并入分类报告折叠区（summary=分类旭日图（可下钻）），
-    # 顺序断言由下方报告区顺序检查覆盖（旭日 → 明细 → 宿主统计）。
-    # 报告区顺序：桑基 → 分类表 → 分类旭日图 → contig 明细 → 宿主预测统计
+    # Krona 旭日块已并入分类报告折叠区（summary=分类旭日图（可下钻））。
+    # 报告区顺序（2026-09-09 用户确认）：分类表 → contig 明细 → 宿主预测统计 → 旭日图
+    # 注：宿主预测统计在 contig 明细下方是用户明确要求（DEVELOPMENT_NOTES 五十五）；
+    #     旭日图并入折叠区后排在最后，故断言为 det < host < sun。
     _i_host = hv.find('id="hostRptSec"')
     _i_det = hv.find('病毒序列分类（contig 明细）')
     _i_sun = hv.find('id="sunC"')
-    check(0 < _i_sun < _i_det < _i_host,
-          '报告区顺序：桑基 → 分类表 → 旭日图 → contig 明细 → 宿主预测统计')
+    check(0 < _i_det < _i_host < _i_sun,
+          '报告区顺序：分类表 → contig 明细 → 宿主预测统计 → 旭日图')
     check(hv.count('<section class="card" id="t-contigs">') == 1
           and hv.count('<section class="card" id="t-assemble">') == 1,
           '④ contigs / ③ assemble 卡存在且唯一')
@@ -144,20 +145,26 @@ def main():
     check('id="anaRun"' not in hv and 'id="anaRunLabel"' in hv,
           '分类表「选择运行」下拉已去除（自动跟随最新运行标签）')
     for marker, where in [('id="vcHostF"', '宿主筛选下拉'),
-                          ('id="anaAutoHost"', '宿主预测自动运行开关'),
+                          ('autoHostIfMissing', '宿主预测自动运行（无宿主列时自动触发）'),
                           ('copyContigSeq(', 'ID 点击复制序列'),
                           ('anaJump(', '四件套跳转注释分析'),
                           ('processAnaJump', '跳转自动续接')]:
         check(marker in hv, f'病毒识别组渲染含 {where}')
     ha = c.get('/tools?g=annotate').get_data(as_text=True)
-    check("['blastn', 'blastx', 'primer']" in ha, 't-hom 卡含 Primer 分析')
+    check(all(f"'{a}'" in ha for a in ('blastn', 'blastx', 'primer')),
+          't-hom 卡含 BLASTN / BLASTX / Primer 分析')
     for marker in ('Best E-value', 'Conserved Domains', 'Primer design complete',
                    'ncbiCdd', 'ncbiNuc'):
         check(marker in ha, f'metabuli 风格结果渲染含 {marker}')
 
     # ---------- 3b. 模块历史运行组件（折叠/衔接/删除） ----------
     import os as _os
-    for pg, n in [('/tools?g=sample', 8), ('/tools?g=compare', 8),
+    # 工具工作台各组页渲染的是同一份 tools.html（卡片由前端按组显隐），
+    # 故历史容器数直接从模板推导，避免硬编码数量随卡片增删而漂移。
+    with open(_os.path.join(PLATFORM_ROOT, 'webapp', 'templates',
+                            'tools.html'), encoding='utf-8') as _f:
+        _n_rh = _f.read().count('class="rh" id="rh-')
+    for pg, n in [('/tools?g=sample', _n_rh), ('/tools?g=compare', _n_rh),
                   ('/hostremoval', 1), ('/hostpredict', 1), ('/orf', 1),
                   ('/annotation', 1), ('/genome', 1), ('/primer', 1)]:
         h = c.get(pg).get_data(as_text=True)
