@@ -7,7 +7,11 @@
 # ============================================================
 
 # ---------- 1. 数据与运行产物（约 28GB，可重新生成或下载） ----------
-databases/
+# databases/ 整体忽略，但内置示例数据例外（README 称「内置」，体积仅 ~200KB，
+# 丢失会导致 tests/_it_platform.py 与前端 ✨示例按钮失效；2026-09-09 曾丢失并重建）
+databases/*
+!databases/examples/
+databases/examples/_work/
 tools/
 downloads/
 fastq/

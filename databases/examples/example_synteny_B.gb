@@ -1,0 +1,114 @@
+LOCUS       example_synteny_B       3300 bp    DNA     linear   VRL 01-JAN-2026
+DEFINITION  Potexvirus example B, complete genome (built-in example).
+ACCESSION   example_synteny_B
+VERSION     example_synteny_B
+KEYWORDS    .
+SOURCE      .
+  ORGANISM  Potexvirus example B
+            .
+FEATURES             Location/Qualifiers
+     CDS             151..990
+                     /product="RNA-dependent RNA polymerase"
+                     /gene="ORF1"
+                     /translation="GQQWSHSTGTTIAANWQDFIICQQYRCMVSENAFDRARGVMPSFG
+                     CDIDHHWEEVSVPHIFVQLNRTPMSPKADGEASDVYTIWYMVYEGGNMNYLIEGDGQNG
+                     CTIQGWYNSTPIIGVARQDCLCKLCQIGPDMFFSCGFTSAHNFNYQSWSLFTWKFAPFA
+                     KWMIWQKPFFFEPEGARFDELFLVMPSIYGGGPHVCYTCAPRDPWGIKYMCIPFLLTVS
+                     YLVYCTYATLLYTVHDYMINRMQEDDRTYYRSCTPPDIACQCIKLPQRIPPMSIDFSG"
+     CDS             651..1490
+                     /product="Triple gene block 1 protein"
+                     /gene="ORF2"
+                     /translation="SNYHRYYKISGPLYPTAGMHLPFDVGDTLYPREGQHMNWHKDSMG
+                     KFTHIYKPGPRPQRYKDPYKEHHCNNADTHCPYRRIAVFELHRNANGFWQTCLHQPVII
+                     WWRAWDDQHFCSTYVYSSMFKFNLLADDGTEHNYNCGCWSKPGCSINVKQHHTGDMIHT
+                     CNYVGANSVGRAKYHYVYELPMRNANGYKYAAGGVTGHITVLRNLIPYGGVNWFAQWAH
+                     EHVTNTLEGIQYNSHHKGQPMSSKCVRHCMCRLFIGPFPCAWLWVHSIVSCANFSMRN"
+     CDS             1151..1990
+                     /product="Triple gene block 2 protein"
+                     /gene="ORF3"
+                     /translation="PWRYDKENKREHHMDLIFFKEYLFTHFSSHRMLNAHFLGKQCEYT
+                     APYRSTLVNQANFNKRRTKIRIARISWDNSFGAKMMLHCRGHFAYGFICEGVEPEEHHV
+                     ADIIYWEIHNWTAPLMNQCCSCPWSGCDKSKTGNMNSKPLCELWDSMFFLLPEKRICNQ
+                     TESHVNHCSLYMEGAQTHDCHHGMAIRICTPHKYGNSFMNFLDCIGMVPGPAWKKHYIE
+                     AHPHSTHGQPLFYCCFAGGRESCDMEGTWLRLQPVEKNAQKRMKNFTNNLGDKGAMCG"
+     CDS             1651..2490
+                     /product="Triple gene block 3 protein"
+                     /gene="ORF4"
+                     /translation="NHTACAGMWVIFMYGYHEGLQKMHPPQCIDMILQHDYCRGGYRCP
+                     SDVSGVESAALTFADRDWQNYPRSKGWLIYDFGQAHKNPVEQVTCDHIRNSLTIMSKHW
+                     MMYWSVQIKHGVTGEGKSQYVKITKDYELWDHAGATVTIQQPKYGRHALPQHKPSLWEC
+                     NKNMTQTCKGIGEMIGWGMYTYDCCSWYGGPPLRCGYGWPRGPPMEHTGEEMCEPMVPS
+                     KDPCTGKFNTSDMERPQWSLYCQICWKISKKWIQIARMHMNLLRADKRESSMPMPITK"
+     CDS             2151..2990
+                     /product="Coat protein"
+                     /gene="ORF5"
+                     /translation="DFGVDHNPTVHPSETHDYPSHQIIKHEGHCVYPYHWEPLDWKCDS
+                     YQNCWSKAGVFGSVWNMRDFKCKMLGCFYGWCKAGPYTIADKQDTNPMSKDSMIVMHAG
+                     SPWGATASKKFGKCFWISHHNSMCFFNLQKLNWNPYGMVCKITKVWQIYMMFVAYCWCR
+                     GSQRTFTQQIFTEGCFSEVTQMKQELACILSGDMMRNRGQNSITGYIYSYDPGDRFRWL
+                     VSPMDHPLWYITCMNLVMYAGAPLREGDAHIQDYPGYHDRAKDSQYCFSQWHFACWNF"
+     CDS             2651..3490
+                     /product="Nucleic acid-binding protein"
+                     /gene="ORF6"
+                     /translation="HLYTELGQNPDWKVVRQLCQICFLSRDLVNPVDRCLASKQENAFM
+                     VQANLNERPEFNCHFGFRYRTIKRNWGFCNDQDLNKDHNIYTSMGSLMLGQFDYQAKIK
+                     HPYPVRGIDRRNREWLYEKHHEDIAYMCREPMTTYTEHLYRANYRFQAITTRHRFKHII
+                     FFLNGWPTSAVEIQWDRENGSIITWWSGFNCWCPATFAGRKLMYYFIVHMPTAYAYQRN
+                     EYDLEGMCTMRLPIDDIAAFDCSRILPQPQGFYEWHVWDYISNIIDCDQIPPAYMTQF"
+ORIGIN
+        1 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+       61 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+      121 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+      181 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+      241 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+      301 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+      361 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+      421 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+      481 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+      541 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+      601 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+      661 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+      721 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+      781 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+      841 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+      901 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+      961 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     1021 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     1081 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     1141 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     1201 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     1261 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     1321 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     1381 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     1441 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     1501 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     1561 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     1621 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     1681 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     1741 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     1801 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     1861 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     1921 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     1981 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     2041 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     2101 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     2161 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     2221 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     2281 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     2341 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     2401 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     2461 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     2521 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     2581 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     2641 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     2701 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     2761 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     2821 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     2881 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     2941 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     3001 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     3061 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     3121 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     3181 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+     3241 nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn nnnnnnnnnn
+//
