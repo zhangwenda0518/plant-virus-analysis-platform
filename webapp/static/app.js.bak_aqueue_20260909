@@ -1739,17 +1739,9 @@ async function batchCreate(btn) {
     toast(t('pp.batchCreate'), `${created.length} ${t('dl.samples')}`, {ttl: 4000});
     loadSamples();
     if ($('batchEnq')?.checked && created.length) {
-      try {
-        const r = await fetch('/api/queue/add', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ samples: created, project })});
-        if (!r.ok) {
-          const d = await r.json().catch(() => ({}));
-          toast(t('pp.qAddFail', '加入队列失败'), d.error || (r.status + ''), {kind: 'failed', ttl: 12000});
-        }
-      } catch (e) {
-        toast(t('pp.qAddFail', '加入队列失败'), String(e), {kind: 'failed', ttl: 12000});
-      }
+      await fetch('/api/queue/add', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ samples: created, project })});
       loadQueue();
     }
   }, '⏳ 批量创建中…');
@@ -1784,28 +1776,12 @@ async function loadQueue() {
 }
 
 async function queueRemove(id) {
-  try {
-    const r = await fetch(`/api/queue/${encodeURIComponent(id)}/remove`, {method: 'POST'});
-    if (!r.ok) {
-      const d = await r.json().catch(() => ({}));
-      toast(t('pp.qRemoveFail', '移除条目失败'), d.error || (r.status + ''), {kind: 'failed', ttl: 12000});
-    }
-  } catch (e) {
-    toast(t('pp.qRemoveFail', '移除条目失败'), String(e), {kind: 'failed', ttl: 12000});
-  }
+  await fetch(`/api/queue/${encodeURIComponent(id)}/remove`, {method: 'POST'});
   loadQueue();
 }
 
 async function queueClear() {
-  try {
-    const r = await fetch('/api/queue/clear_finished', {method: 'POST'});
-    if (!r.ok) {
-      const d = await r.json().catch(() => ({}));
-      toast(t('pp.qClearFail', '清除已完成条目失败'), d.error || (r.status + ''), {kind: 'failed', ttl: 12000});
-    }
-  } catch (e) {
-    toast(t('pp.qClearFail', '清除已完成条目失败'), String(e), {kind: 'failed', ttl: 12000});
-  }
+  await fetch('/api/queue/clear_finished', {method: 'POST'});
   loadQueue();
 }
 

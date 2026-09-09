@@ -7887,11 +7887,6 @@ def api_sample_clear(sample):
     #   input.json   —— 样品输入登记（在 00_prep 内）
     #   project.json —— 项目清单（项目身份/输入/参数）
     keep_top = {'project.json'}
-    # 二次检查：上面的 _sample_busy 与这里之间有读档案/建目录等磁盘操作，
-    # 队列或手动任务可能刚好在这段窗口内启动。Windows 上 rmtree 遇到
-    # 正在写入的文件会抛 PermissionError 并留下半删目录，所以必须重新确认。
-    if _sample_busy(safe):
-        abort(400, f'样品 {safe} 刚刚启动了任务，请先取消再清除')
     for name in os.listdir(d):
         p = os.path.join(d, name)
         if name in keep_top:
@@ -7902,26 +7897,14 @@ def api_sample_clear(sample):
                 if f == 'input.json':
                     continue
                 fp = os.path.join(prep, f)
-                try:
-                    if os.path.isdir(fp):
-                        shutil.rmtree(fp)
-                    else:
-                        os.remove(fp)
-                except PermissionError:
-                    abort(400, f'文件 {f} 正在被任务占用，无法删除，'
-                               f'请等待任务结束或先取消')
+                if os.path.isdir(fp):
+                    shutil.rmtree(fp)
+                else:
+                    os.remove(fp)
         elif os.path.isdir(p):
-            try:
-                shutil.rmtree(p)
-            except PermissionError:
-                abort(400, f'目录 {name} 正在被任务占用，无法删除，'
-                           f'请等待任务结束或先取消')
+            shutil.rmtree(p)
         else:
-            try:
-                os.remove(p)
-            except PermissionError:
-                abort(400, f'文件 {name} 正在被任务占用，无法删除，'
-                           f'请等待任务结束或先取消')
+            os.remove(p)
     # 结果已清空，清单里的结果类字段必须一并归零，
     # 否则 project.json 会声称还有已完成的阶段（与卡片状态矛盾）。
     # 仅保留项目身份：project / input / params / schema / created。
@@ -7955,16 +7938,7 @@ def api_sample_delete(sample):
     # 双保险：必须是 results/ 的直接子目录
     if os.path.dirname(os.path.abspath(d)) != os.path.abspath(DIRS['results']):
         abort(400, '仅允许删除样品目录')
-    # 二次检查：上面的 _sample_busy 与这里之间有路径校验等操作，任务可能
-    # 刚好在这段窗口内启动。Windows 上 rmtree 遇到正在写入的文件会抛
-    # PermissionError 并留下半删目录。
-    if _sample_busy(safe):
-        abort(400, f'样品 {safe} 刚刚启动了任务，请先取消再删除')
-    try:
-        shutil.rmtree(d)
-    except PermissionError:
-        abort(400, f'样品目录 {safe} 正在被任务占用，无法删除，'
-                   f'请等待任务结束或先取消')
+    shutil.rmtree(d)
     return jsonify({'ok': True})
 
 

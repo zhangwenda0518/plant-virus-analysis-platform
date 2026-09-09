@@ -434,15 +434,6 @@ def _task_register(proc):
     procs = getattr(_TASK_STATE, 'procs', None)
     if procs is not None:
         procs.append(proc)
-    # 竞态泄漏：Popen 到本函数之间有一个微秒级窗口，若 cancel 恰好在此期间
-    # 置位，TaskManager.cancel 的 procs 快照看不到它，该进程会成为孤儿
-    # （任务已结束但进程仍在跑，需手工 taskkill）。注册后立即复查一次。
-    ev = getattr(_TASK_STATE, 'cancel', None)
-    if ev is not None and ev.is_set():
-        try:
-            proc.kill()
-        except Exception:
-            pass
 
 
 def task_register_proc(proc):
