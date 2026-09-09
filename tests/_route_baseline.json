@@ -1,0 +1,723 @@
+{
+ "endpoints": {
+  "/": "page_index",
+  "/annotation": "page_annotation",
+  "/api/align/file": "api_align_file",
+  "/api/align/save": "api_align_save",
+  "/api/analyze": "api_analyze",
+  "/api/browse": "api_browse",
+  "/api/build_host_db": "api_build_host_db",
+  "/api/build_kv_index": "api_build_kv_index",
+  "/api/build_taxonomy": "api_build_taxonomy",
+  "/api/build_universal_db": "api_build_universal_db",
+  "/api/build_virus_db": "api_build_virus_db",
+  "/api/compare/preview": "api_compare_preview",
+  "/api/compare/run": "api_compare_run",
+  "/api/convert_kraken2": "api_convert_kraken2",
+  "/api/dbs": "api_dbs",
+  "/api/dl/batch/<bid>": "api_dl_batch",
+  "/api/dl/batch/<bid>/<action>": "api_dl_batch_action",
+  "/api/dl/batches": "api_dl_batches",
+  "/api/dl/create": "api_dl_create",
+  "/api/dl/to_pipeline": "api_dl_to_pipeline",
+  "/api/gb/collections": "api_gb_collections",
+  "/api/gb/download": "api_gb_download",
+  "/api/gb/extract": "api_gb_extract",
+  "/api/gb/extract_files": "api_gb_extract_files",
+  "/api/gb/import": "api_gb_import",
+  "/api/gb/inspect": "api_gb_inspect",
+  "/api/gb/phylo": "api_gb_phylo",
+  "/api/ictv/cascade": "api_ictv_cascade",
+  "/api/ictv/download": "api_ictv_download",
+  "/api/ictv/preview": "api_ictv_preview",
+  "/api/kv_index_list": "api_kv_index_list",
+  "/api/kv_index_register": "api_kv_index_register",
+  "/api/load_host_db": "api_load_host_db",
+  "/api/load_taxonomy": "api_load_taxonomy",
+  "/api/logan/batch_ready": "api_logan_batch_ready",
+  "/api/logan/contigs/<sample>": "api_logan_contigs",
+  "/api/logan/create": "api_logan_create",
+  "/api/logan/job/<name>": "api_logan_job",
+  "/api/logan/job/<name>/batch": "api_logan_batch",
+  "/api/logan/job/<name>/delete": "api_logan_delete",
+  "/api/logan/job/<name>/import/<int:idx>": "api_logan_import",
+  "/api/logan/job/<name>/query": "api_logan_query_dl",
+  "/api/logan/job/<name>/segment/<int:idx>": "api_logan_segment",
+  "/api/logan/jobs": "api_logan_jobs",
+  "/api/logan/samples": "api_logan_samples",
+  "/api/meta/ai_fill": "api_meta_ai_fill",
+  "/api/meta/ai_summary": "api_meta_ai_summary",
+  "/api/meta/cell": "api_meta_cell",
+  "/api/meta/collection/<name>/delete": "api_meta_collection_delete",
+  "/api/meta/collections": "api_meta_collections",
+  "/api/meta/export": "api_meta_export",
+  "/api/meta/fill_cache": "api_meta_fill_cache",
+  "/api/meta/import": "api_meta_import",
+  "/api/meta/info": "api_meta_info",
+  "/api/meta/overview": "api_meta_overview",
+  "/api/meta/plot": "api_meta_plot",
+  "/api/meta/plot/file": "api_meta_plot_file",
+  "/api/meta/plot/files": "api_meta_plot_files",
+  "/api/meta/record": "api_meta_record",
+  "/api/meta/row": "api_meta_row",
+  "/api/meta/rows/delete": "api_meta_rows_delete",
+  "/api/meta/search": "api_meta_search",
+  "/api/meta/table/<name>": "api_meta_table",
+  "/api/meta/unique/<name>": "api_meta_unique",
+  "/api/msa/data": "api_msa_data",
+  "/api/msa/samples": "api_msa_samples",
+  "/api/ncbi/collections": "api_ncbi_collections",
+  "/api/ncbi/download": "api_ncbi_download",
+  "/api/ncbi/search": "api_ncbi_search",
+  "/api/open_platform_dir": "api_open_platform_dir",
+  "/api/open_report_dir/<sample>": "api_open_report_dir",
+  "/api/paste_input": "api_paste_input",
+  "/api/pipeline/<sample>": "api_pipeline",
+  "/api/pipeline/<sample>/run": "api_pipeline_run",
+  "/api/pipeline/create": "api_pipeline_create",
+  "/api/queue": "api_queue",
+  "/api/queue/<entry_id>/remove": "api_queue_remove",
+  "/api/queue/add": "api_queue_add",
+  "/api/queue/clear_finished": "api_queue_clear",
+  "/api/register_virus_lib": "api_register_virus_lib",
+  "/api/sample_files/<sample>": "api_sample_files",
+  "/api/samples": "api_samples",
+  "/api/samples/<sample>/<path:rel>": "api_sample_file",
+  "/api/samples/<sample>/clear": "api_sample_clear",
+  "/api/samples/<sample>/delete": "api_sample_delete",
+  "/api/samples/archived": "api_samples_archived",
+  "/api/sdt/data": "api_sdt_data",
+  "/api/seqview": "api_seqview",
+  "/api/settings": "api_settings_set",
+  "/api/storage": "api_storage",
+  "/api/storage/rescan": "api_storage_rescan",
+  "/api/submit/contig_runs": "api_submit_contig_runs",
+  "/api/submit/copy": "api_submit_copy",
+  "/api/submit/create": "api_submit_create",
+  "/api/submit/orf_runs": "api_submit_orf_runs",
+  "/api/submit/samples": "api_submit_samples",
+  "/api/submit/table/<name>": "api_submit_table",
+  "/api/submit/table/<name>/biosample": "api_submit_table_biosample",
+  "/api/submit/table/<name>/delete": "api_submit_table_delete",
+  "/api/submit/table/<name>/export": "api_submit_table_export",
+  "/api/submit/table/<name>/fasta": "api_submit_table_fasta",
+  "/api/submit/table/<name>/file": "api_submit_table_file",
+  "/api/submit/table/<name>/file_save": "api_submit_table_file_save",
+  "/api/submit/table/<name>/fill": "api_submit_table_fill",
+  "/api/submit/table/<name>/import_run": "api_submit_table_import_run",
+  "/api/submit/table/<name>/link_orf": "api_submit_table_link_orf",
+  "/api/submit/table/<name>/package": "api_submit_table_package",
+  "/api/submit/table/<name>/rows": "api_submit_table_rows",
+  "/api/submit/table/<name>/save": "api_submit_table_save",
+  "/api/submit/table/<name>/sbt": "api_submit_table_sbt",
+  "/api/submit/table/<name>/source_fasta": "api_submit_table_source_fasta",
+  "/api/submit/table/<name>/sqn": "api_submit_table_sqn",
+  "/api/submit/table/<name>/sqn_status": "api_submit_table_sqn_status",
+  "/api/submit/table/<name>/taxonomy_check": "api_submit_table_taxonomy_check",
+  "/api/submit/table/<name>/tbl": "api_submit_table_tbl",
+  "/api/submit/table/<name>/validate": "api_submit_table_validate",
+  "/api/submit/tables": "api_submit_tables",
+  "/api/submit/upload": "api_submit_upload",
+  "/api/task/<tid>": "api_task",
+  "/api/task/<tid>/cancel": "api_task_cancel",
+  "/api/task/<tid>/delete": "api_task_delete",
+  "/api/task/<tid>/log": "api_task_log",
+  "/api/task/<tid>/stream": "api_task_stream",
+  "/api/tasks": "api_tasks",
+  "/api/tasks/clear_finished": "api_tasks_clear_finished",
+  "/api/tool/analysis": "api_tool_analysis",
+  "/api/tool/analyze": "api_tool_analyze",
+  "/api/tool/chain_result": "api_tool_chain_result",
+  "/api/tool/consensus_result": "api_tool_consensus_result",
+  "/api/tool/genoplot_preview": "api_tool_genoplot_preview",
+  "/api/tool/hostpredict_run": "api_tool_hostpredict_run",
+  "/api/tool/kvsuite_refs": "api_tool_kvsuite_refs",
+  "/api/tool/kvsuite_result": "api_tool_kvsuite_result",
+  "/api/tool/msa_data": "api_tool_msa_data",
+  "/api/tool/open": "api_tool_open",
+  "/api/tool/quicktree_data": "api_tool_quicktree_data",
+  "/api/tool/report": "api_tool_report",
+  "/api/tool/report_data": "api_tool_report_data",
+  "/api/tool/run": "api_tool_run",
+  "/api/tool/runs": "api_tool_runs",
+  "/api/tool/runs/<run>/delete": "api_tool_run_delete",
+  "/api/tool/structcmp_data": "api_tool_structcmp_data",
+  "/api/tool/verify_result": "api_tool_verify_result",
+  "/api/tool/viral_contigs": "api_tool_viral_contigs",
+  "/api/tools": "api_tools",
+  "/api/tree/data": "api_tree_data",
+  "/api/tree/file": "api_tree_file",
+  "/api/upload": "api_upload",
+  "/archive_report/<sample>/": "page_archive_report",
+  "/build": "page_build",
+  "/compare/<name>/": "page_compare",
+  "/compare/<name>/<path:filename>": "page_compare_file",
+  "/download": "page_download",
+  "/downloads/<bid>/<path:filename>": "page_dl_file",
+  "/genome": "page_genome",
+  "/help": "page_help",
+  "/hostpredict": "page_hostpredict",
+  "/hostremoval": "page_host_removal",
+  "/logan": "page_logan",
+  "/logan/report/<name>/": "page_logan_report",
+  "/logan/report/<name>/<path:filename>": "page_logan_report_file",
+  "/meta": "page_meta",
+  "/meta_files/<name>/<path:subpath>": "meta_files_download",
+  "/orf": "page_orf",
+  "/pipeline": "page_pipeline",
+  "/primer": "page_primer",
+  "/report/<sample>/": "page_report",
+  "/report/<sample>/<path:filename>": "page_report_file",
+  "/results": "page_results",
+  "/samples": "page_samples",
+  "/settings": "page_settings",
+  "/submissions/<name>/<path:fname>": "submissions_download",
+  "/submit": "page_submit",
+  "/tasks": "page_tasks",
+  "/tool_runs/<run>/<path:filename>": "page_tool_run_file",
+  "/tools": "page_tools",
+  "/virome": "page_virome",
+  "/virome/": "page_virome_app",
+  "/virome/<path:filename>": "virome_asset"
+ },
+ "rules": {
+  "/": [
+   "GET"
+  ],
+  "/annotation": [
+   "GET"
+  ],
+  "/api/align/file": [
+   "GET"
+  ],
+  "/api/align/save": [
+   "POST"
+  ],
+  "/api/analyze": [
+   "POST"
+  ],
+  "/api/browse": [
+   "GET"
+  ],
+  "/api/build_host_db": [
+   "POST"
+  ],
+  "/api/build_kv_index": [
+   "POST"
+  ],
+  "/api/build_taxonomy": [
+   "POST"
+  ],
+  "/api/build_universal_db": [
+   "POST"
+  ],
+  "/api/build_virus_db": [
+   "POST"
+  ],
+  "/api/compare/preview": [
+   "GET"
+  ],
+  "/api/compare/run": [
+   "POST"
+  ],
+  "/api/convert_kraken2": [
+   "POST"
+  ],
+  "/api/dbs": [
+   "GET"
+  ],
+  "/api/dl/batch/<bid>": [
+   "GET"
+  ],
+  "/api/dl/batch/<bid>/<action>": [
+   "POST"
+  ],
+  "/api/dl/batches": [
+   "GET"
+  ],
+  "/api/dl/create": [
+   "POST"
+  ],
+  "/api/dl/to_pipeline": [
+   "POST"
+  ],
+  "/api/gb/collections": [
+   "GET"
+  ],
+  "/api/gb/download": [
+   "POST"
+  ],
+  "/api/gb/extract": [
+   "POST"
+  ],
+  "/api/gb/extract_files": [
+   "GET"
+  ],
+  "/api/gb/import": [
+   "POST"
+  ],
+  "/api/gb/inspect": [
+   "POST"
+  ],
+  "/api/gb/phylo": [
+   "POST"
+  ],
+  "/api/ictv/cascade": [
+   "GET"
+  ],
+  "/api/ictv/download": [
+   "POST"
+  ],
+  "/api/ictv/preview": [
+   "POST"
+  ],
+  "/api/kv_index_list": [
+   "GET"
+  ],
+  "/api/kv_index_register": [
+   "POST"
+  ],
+  "/api/load_host_db": [
+   "POST"
+  ],
+  "/api/load_taxonomy": [
+   "POST"
+  ],
+  "/api/logan/batch_ready": [
+   "GET"
+  ],
+  "/api/logan/contigs/<sample>": [
+   "GET"
+  ],
+  "/api/logan/create": [
+   "POST"
+  ],
+  "/api/logan/job/<name>": [
+   "GET"
+  ],
+  "/api/logan/job/<name>/batch": [
+   "POST"
+  ],
+  "/api/logan/job/<name>/delete": [
+   "POST"
+  ],
+  "/api/logan/job/<name>/import/<int:idx>": [
+   "POST"
+  ],
+  "/api/logan/job/<name>/query": [
+   "GET"
+  ],
+  "/api/logan/job/<name>/segment/<int:idx>": [
+   "GET"
+  ],
+  "/api/logan/jobs": [
+   "GET"
+  ],
+  "/api/logan/samples": [
+   "GET"
+  ],
+  "/api/meta/ai_fill": [
+   "POST"
+  ],
+  "/api/meta/ai_summary": [
+   "POST"
+  ],
+  "/api/meta/cell": [
+   "POST"
+  ],
+  "/api/meta/collection/<name>/delete": [
+   "POST"
+  ],
+  "/api/meta/collections": [
+   "GET"
+  ],
+  "/api/meta/export": [
+   "GET"
+  ],
+  "/api/meta/fill_cache": [
+   "POST"
+  ],
+  "/api/meta/import": [
+   "POST"
+  ],
+  "/api/meta/info": [
+   "POST"
+  ],
+  "/api/meta/overview": [
+   "GET"
+  ],
+  "/api/meta/plot": [
+   "POST"
+  ],
+  "/api/meta/plot/file": [
+   "GET"
+  ],
+  "/api/meta/plot/files": [
+   "GET"
+  ],
+  "/api/meta/record": [
+   "GET"
+  ],
+  "/api/meta/row": [
+   "POST"
+  ],
+  "/api/meta/rows/delete": [
+   "POST"
+  ],
+  "/api/meta/search": [
+   "POST"
+  ],
+  "/api/meta/table/<name>": [
+   "GET"
+  ],
+  "/api/meta/unique/<name>": [
+   "GET"
+  ],
+  "/api/msa/data": [
+   "GET"
+  ],
+  "/api/msa/samples": [
+   "GET"
+  ],
+  "/api/ncbi/collections": [
+   "GET"
+  ],
+  "/api/ncbi/download": [
+   "POST"
+  ],
+  "/api/ncbi/search": [
+   "POST"
+  ],
+  "/api/open_platform_dir": [
+   "GET"
+  ],
+  "/api/open_report_dir/<sample>": [
+   "GET"
+  ],
+  "/api/paste_input": [
+   "POST"
+  ],
+  "/api/pipeline/<sample>": [
+   "GET"
+  ],
+  "/api/pipeline/<sample>/run": [
+   "POST"
+  ],
+  "/api/pipeline/create": [
+   "POST"
+  ],
+  "/api/queue": [
+   "GET"
+  ],
+  "/api/queue/<entry_id>/remove": [
+   "POST"
+  ],
+  "/api/queue/add": [
+   "POST"
+  ],
+  "/api/queue/clear_finished": [
+   "POST"
+  ],
+  "/api/register_virus_lib": [
+   "POST"
+  ],
+  "/api/sample_files/<sample>": [
+   "GET"
+  ],
+  "/api/samples": [
+   "GET"
+  ],
+  "/api/samples/<sample>/<path:rel>": [
+   "GET"
+  ],
+  "/api/samples/<sample>/clear": [
+   "POST"
+  ],
+  "/api/samples/<sample>/delete": [
+   "POST"
+  ],
+  "/api/samples/archived": [
+   "GET"
+  ],
+  "/api/sdt/data": [
+   "GET"
+  ],
+  "/api/seqview": [
+   "GET"
+  ],
+  "/api/settings": [
+   "GET",
+   "POST"
+  ],
+  "/api/storage": [
+   "GET"
+  ],
+  "/api/storage/rescan": [
+   "POST"
+  ],
+  "/api/submit/contig_runs": [
+   "GET"
+  ],
+  "/api/submit/copy": [
+   "POST"
+  ],
+  "/api/submit/create": [
+   "POST"
+  ],
+  "/api/submit/orf_runs": [
+   "GET"
+  ],
+  "/api/submit/samples": [
+   "GET"
+  ],
+  "/api/submit/table/<name>": [
+   "GET"
+  ],
+  "/api/submit/table/<name>/biosample": [
+   "POST"
+  ],
+  "/api/submit/table/<name>/delete": [
+   "POST"
+  ],
+  "/api/submit/table/<name>/export": [
+   "POST"
+  ],
+  "/api/submit/table/<name>/fasta": [
+   "POST"
+  ],
+  "/api/submit/table/<name>/file": [
+   "GET"
+  ],
+  "/api/submit/table/<name>/file_save": [
+   "POST"
+  ],
+  "/api/submit/table/<name>/fill": [
+   "POST"
+  ],
+  "/api/submit/table/<name>/import_run": [
+   "POST"
+  ],
+  "/api/submit/table/<name>/link_orf": [
+   "POST"
+  ],
+  "/api/submit/table/<name>/package": [
+   "POST"
+  ],
+  "/api/submit/table/<name>/rows": [
+   "POST"
+  ],
+  "/api/submit/table/<name>/save": [
+   "POST"
+  ],
+  "/api/submit/table/<name>/sbt": [
+   "POST"
+  ],
+  "/api/submit/table/<name>/source_fasta": [
+   "GET"
+  ],
+  "/api/submit/table/<name>/sqn": [
+   "POST"
+  ],
+  "/api/submit/table/<name>/sqn_status": [
+   "GET"
+  ],
+  "/api/submit/table/<name>/taxonomy_check": [
+   "POST"
+  ],
+  "/api/submit/table/<name>/tbl": [
+   "POST"
+  ],
+  "/api/submit/table/<name>/validate": [
+   "POST"
+  ],
+  "/api/submit/tables": [
+   "GET"
+  ],
+  "/api/submit/upload": [
+   "POST"
+  ],
+  "/api/task/<tid>": [
+   "GET"
+  ],
+  "/api/task/<tid>/cancel": [
+   "POST"
+  ],
+  "/api/task/<tid>/delete": [
+   "POST"
+  ],
+  "/api/task/<tid>/log": [
+   "GET"
+  ],
+  "/api/task/<tid>/stream": [
+   "GET"
+  ],
+  "/api/tasks": [
+   "GET"
+  ],
+  "/api/tasks/clear_finished": [
+   "POST"
+  ],
+  "/api/tool/analysis": [
+   "GET"
+  ],
+  "/api/tool/analyze": [
+   "POST"
+  ],
+  "/api/tool/chain_result": [
+   "GET"
+  ],
+  "/api/tool/consensus_result": [
+   "GET"
+  ],
+  "/api/tool/genoplot_preview": [
+   "POST"
+  ],
+  "/api/tool/hostpredict_run": [
+   "POST"
+  ],
+  "/api/tool/kvsuite_refs": [
+   "GET"
+  ],
+  "/api/tool/kvsuite_result": [
+   "GET"
+  ],
+  "/api/tool/msa_data": [
+   "GET"
+  ],
+  "/api/tool/open": [
+   "POST"
+  ],
+  "/api/tool/quicktree_data": [
+   "GET"
+  ],
+  "/api/tool/report": [
+   "GET"
+  ],
+  "/api/tool/report_data": [
+   "GET"
+  ],
+  "/api/tool/run": [
+   "POST"
+  ],
+  "/api/tool/runs": [
+   "GET"
+  ],
+  "/api/tool/runs/<run>/delete": [
+   "POST"
+  ],
+  "/api/tool/structcmp_data": [
+   "GET"
+  ],
+  "/api/tool/verify_result": [
+   "GET"
+  ],
+  "/api/tool/viral_contigs": [
+   "GET"
+  ],
+  "/api/tools": [
+   "GET"
+  ],
+  "/api/tree/data": [
+   "GET"
+  ],
+  "/api/tree/file": [
+   "GET"
+  ],
+  "/api/upload": [
+   "POST"
+  ],
+  "/archive_report/<sample>/": [
+   "GET"
+  ],
+  "/build": [
+   "GET"
+  ],
+  "/compare/<name>/": [
+   "GET"
+  ],
+  "/compare/<name>/<path:filename>": [
+   "GET"
+  ],
+  "/download": [
+   "GET"
+  ],
+  "/downloads/<bid>/<path:filename>": [
+   "GET"
+  ],
+  "/genome": [
+   "GET"
+  ],
+  "/help": [
+   "GET"
+  ],
+  "/hostpredict": [
+   "GET"
+  ],
+  "/hostremoval": [
+   "GET"
+  ],
+  "/logan": [
+   "GET"
+  ],
+  "/logan/report/<name>/": [
+   "GET"
+  ],
+  "/logan/report/<name>/<path:filename>": [
+   "GET"
+  ],
+  "/meta": [
+   "GET"
+  ],
+  "/meta_files/<name>/<path:subpath>": [
+   "GET"
+  ],
+  "/orf": [
+   "GET"
+  ],
+  "/pipeline": [
+   "GET"
+  ],
+  "/primer": [
+   "GET"
+  ],
+  "/report/<sample>/": [
+   "GET"
+  ],
+  "/report/<sample>/<path:filename>": [
+   "GET"
+  ],
+  "/results": [
+   "GET"
+  ],
+  "/samples": [
+   "GET"
+  ],
+  "/settings": [
+   "GET"
+  ],
+  "/submissions/<name>/<path:fname>": [
+   "GET"
+  ],
+  "/submit": [
+   "GET"
+  ],
+  "/tasks": [
+   "GET"
+  ],
+  "/tool_runs/<run>/<path:filename>": [
+   "GET"
+  ],
+  "/tools": [
+   "GET"
+  ],
+  "/virome": [
+   "GET"
+  ],
+  "/virome/": [
+   "GET"
+  ],
+  "/virome/<path:filename>": [
+   "GET"
+  ]
+ }
+}
